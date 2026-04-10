@@ -1,9 +1,11 @@
-(function bootstrapSheetMate() {
-  if (window.__sheetMateContentScriptLoaded__) {
-    return;
-  }
+const SHEET_MATE_TEST_MODE = globalThis.__SHEET_MATE_TEST__ === true;
 
-  window.__sheetMateContentScriptLoaded__ = true;
+function createSheetMateContentScriptRuntime(options = {}) {
+  const { skipAutoStart = false } = options;
+
+  if (!skipAutoStart && window.__sheetMateContentScriptLoaded__) {
+    return null;
+  }
 
   const LAST_SENT_SNAPSHOT_KEY = "__sheetMateLastSentSnapshot__";
   const LAST_SENT_STATUS_KEY = "__sheetMateLastSentStatus__";
@@ -75,9 +77,15 @@
   let captureInterval = null;
   let mutationObserver = null;
   let isShutDown = false;
+  let runtimeStarted = false;
+  let currentRouteUrl = window.location.href;
+  let currentNavigationFingerprint = "";
+  let pageSessionVersion = 0;
+  let pageSessionKey = "";
+  let originalPushState = null;
+  let originalReplaceState = null;
+  const routeCaptureTimers = new Set();
   const listenerDisposers = [];
-
-  reportReady();
 
   function scheduleCapture() {
     if (isShutDown) {
@@ -103,6 +111,10 @@
       return;
     }
 
+    if (reconcilePageSession()) {
+      reportReady();
+    }
+
     if (document.hidden) {
       return;
     }
@@ -118,7 +130,10 @@
       result.snapshot.cellRef || "",
       result.snapshot.rawContent || "",
       result.snapshot.source || "",
-      result.snapshot.extractorStage || ""
+      result.snapshot.extractorStage || "",
+      result.snapshot.pageTitle || "",
+      result.snapshot.url || "",
+      result.snapshot.pageSessionKey || ""
     ]);
 
     if (window[LAST_SENT_SNAPSHOT_KEY] === fingerprint) {
@@ -630,9 +645,10 @@
   }
 
   function reportReady() {
+    const context = buildPageContext();
     const pageSupport = detectPageSupport();
     safeSendRuntimeMessage("CONTENT_SCRIPT_READY", {
-      ...buildPageContext(),
+      ...context,
       pageKind: pageSupport.pageKind,
       pageSupported: pageSupport.pageSupported,
       supportReason: pageSupport.supportReason
@@ -644,13 +660,17 @@
       return;
     }
 
+    const context = buildPageContext();
     const fingerprint = JSON.stringify([
       status.stage || "",
       status.message || "",
       status.error || "",
       status.pageKind || "",
       String(status.pageSupported ?? ""),
-      status.supportReason || ""
+      status.supportReason || "",
+      context.pageTitle || "",
+      context.url || "",
+      context.pageSessionKey || ""
     ]);
 
     if (window[LAST_SENT_STATUS_KEY] === fingerprint) {
@@ -659,7 +679,7 @@
 
     window[LAST_SENT_STATUS_KEY] = fingerprint;
     safeSendRuntimeMessage("CAPTURE_STATUS", {
-      ...buildPageContext(),
+      ...context,
       ...status
     });
   }
@@ -713,6 +733,104 @@
     });
   }
 
+  function scheduleRouteCapture(delayMs) {
+    if (isShutDown) {
+      return;
+    }
+
+    if (delayMs <= 0) {
+      scheduleCapture();
+      return;
+    }
+
+    const timerId = window.setTimeout(() => {
+      routeCaptureTimers.delete(timerId);
+      scheduleCapture();
+    }, delayMs);
+
+    routeCaptureTimers.add(timerId);
+  }
+
+  function resetMessageFingerprints() {
+    window[LAST_SENT_SNAPSHOT_KEY] = "";
+    window[LAST_SENT_STATUS_KEY] = "";
+  }
+
+  function serializeHistoryState() {
+    try {
+      const serialized = JSON.stringify(history.state);
+      if (serialized !== undefined) {
+        return serialized;
+      }
+    } catch {
+      return `[unserializable:${Object.prototype.toString.call(history.state)}]`;
+    }
+
+    return `[nonserializable:${typeof history.state}]`;
+  }
+
+  function buildNavigationFingerprint() {
+    return JSON.stringify([
+      window.location.href,
+      document.title || "",
+      serializeHistoryState()
+    ]);
+  }
+
+  function beginNewPageSession(nextFingerprint) {
+    currentNavigationFingerprint = nextFingerprint;
+    currentRouteUrl = window.location.href;
+    pageSessionVersion += 1;
+    pageSessionKey = `session-${pageSessionVersion}`;
+    resetMessageFingerprints();
+  }
+
+  function reconcilePageSession() {
+    const nextFingerprint = buildNavigationFingerprint();
+    if (nextFingerprint === currentNavigationFingerprint && pageSessionKey) {
+      return false;
+    }
+
+    beginNewPageSession(nextFingerprint);
+    return true;
+  }
+
+  function handleRouteChange() {
+    if (isShutDown) {
+      return;
+    }
+
+    if (!reconcilePageSession()) {
+      return;
+    }
+
+    reportReady();
+    scheduleRouteCapture(0);
+    scheduleRouteCapture(250);
+    scheduleRouteCapture(1000);
+  }
+
+  function installRouteChangeObservers() {
+    originalPushState = typeof history.pushState === "function" ? history.pushState : null;
+    originalReplaceState = typeof history.replaceState === "function" ? history.replaceState : null;
+
+    if (originalPushState) {
+      history.pushState = function patchedPushState(...args) {
+        const result = originalPushState.apply(history, args);
+        handleRouteChange();
+        return result;
+      };
+    }
+
+    if (originalReplaceState) {
+      history.replaceState = function patchedReplaceState(...args) {
+        const result = originalReplaceState.apply(history, args);
+        handleRouteChange();
+        return result;
+      };
+    }
+  }
+
   function teardown() {
     if (isShutDown) {
       return;
@@ -732,6 +850,21 @@
       mutationObserver = null;
     }
 
+    for (const timerId of routeCaptureTimers) {
+      window.clearTimeout(timerId);
+    }
+    routeCaptureTimers.clear();
+
+    if (originalPushState) {
+      history.pushState = originalPushState;
+      originalPushState = null;
+    }
+
+    if (originalReplaceState) {
+      history.replaceState = originalReplaceState;
+      originalReplaceState = null;
+    }
+
     while (listenerDisposers.length) {
       const dispose = listenerDisposers.pop();
       dispose?.();
@@ -741,7 +874,8 @@
   function buildPageContext() {
     return {
       pageTitle: sanitizeInlineText(document.title.replace(/\s*-\s*飞书.*/, "")),
-      url: window.location.href
+      url: window.location.href,
+      pageSessionKey
     };
   }
 
@@ -913,36 +1047,104 @@
     return rect.bottom > 0 && rect.top < TOP_BAR_SCAN_MAX_TOP;
   }
 
-  const passiveEvents = [
-    "click",
-    "dblclick",
-    "mouseup",
-    "keyup",
-    "keydown",
-    "focusin",
-    "input",
-    "change",
-    "paste"
-  ];
+  function start() {
+    if (runtimeStarted || isShutDown || window.__sheetMateContentScriptLoaded__) {
+      return;
+    }
 
-  for (const eventName of passiveEvents) {
-    addManagedListener(document, eventName, scheduleCapture, true);
+    runtimeStarted = true;
+    window.__sheetMateContentScriptLoaded__ = true;
+
+    reconcilePageSession();
+    reportReady();
+    installRouteChangeObservers();
+
+    const passiveEvents = [
+      "click",
+      "dblclick",
+      "mouseup",
+      "keyup",
+      "keydown",
+      "focusin",
+      "input",
+      "change",
+      "paste"
+    ];
+
+    for (const eventName of passiveEvents) {
+      addManagedListener(document, eventName, scheduleCapture, true);
+    }
+
+    addManagedListener(document, "selectionchange", scheduleCapture, true);
+    addManagedListener(window, "hashchange", handleRouteChange, true);
+    addManagedListener(window, "popstate", handleRouteChange, true);
+
+    mutationObserver = new MutationObserver(() => {
+      scheduleCapture();
+    });
+
+    mutationObserver.observe(document.documentElement, {
+      subtree: true,
+      childList: true,
+      characterData: true,
+      attributes: true
+    });
+
+    captureInterval = window.setInterval(scheduleCapture, POLL_INTERVAL_MS);
+    scheduleCapture();
   }
 
-  addManagedListener(document, "selectionchange", scheduleCapture, true);
-  addManagedListener(window, "hashchange", scheduleCapture, true);
+  const runtime = {
+    buildGridCandidate,
+    buildHitMessage,
+    buildPageContext,
+    captureAndSendSnapshot,
+    chooseBestCandidate,
+    columnNumberToName,
+    detectPageSupport,
+    deriveCellReference,
+    findEditorCandidate,
+    findFocusedGridElement,
+    findFormulaBarCandidate,
+    findNameBoxCandidate,
+    findSelectedCellCandidate,
+    parseCellReference,
+    reconcilePageSession,
+    readCellSnapshot,
+    reportCaptureStatus,
+    reportReady,
+    handleRouteChange,
+    scheduleCapture,
+    start,
+    teardown,
+    translateSource
+  };
 
-  mutationObserver = new MutationObserver(() => {
-    scheduleCapture();
-  });
+  if (!skipAutoStart) {
+    start();
+  }
 
-  mutationObserver.observe(document.documentElement, {
-    subtree: true,
-    childList: true,
-    characterData: true,
-    attributes: true
-  });
+  return runtime;
+}
 
-  captureInterval = window.setInterval(scheduleCapture, POLL_INTERVAL_MS);
-  scheduleCapture();
-})();
+function bootstrapSheetMate() {
+  return createSheetMateContentScriptRuntime();
+}
+
+function exposeContentScriptTestExports() {
+  if (!SHEET_MATE_TEST_MODE) {
+    return;
+  }
+
+  const root = globalThis.__sheetMateTestExports || (globalThis.__sheetMateTestExports = {});
+  root.contentScript = {
+    bootstrapSheetMate,
+    createSheetMateContentScriptRuntime
+  };
+}
+
+exposeContentScriptTestExports();
+
+if (!SHEET_MATE_TEST_MODE) {
+  bootstrapSheetMate();
+}

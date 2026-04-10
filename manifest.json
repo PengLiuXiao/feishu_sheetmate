@@ -6,11 +6,13 @@
   "permissions": [
     "storage",
     "sidePanel",
-    "tabs"
+    "tabs",
+    "scripting"
   ],
   "host_permissions": [
     "https://*.feishu.cn/*",
-    "https://*.larksuite.com/*"
+    "https://*.larksuite.com/*",
+    "https://*.larkoffice.com/*"
   ],
   "background": {
     "service_worker": "background.js"
@@ -25,7 +27,8 @@
     {
       "matches": [
         "https://*.feishu.cn/*",
-        "https://*.larksuite.com/*"
+        "https://*.larksuite.com/*",
+        "https://*.larkoffice.com/*"
       ],
       "js": [
         "content-script.js"

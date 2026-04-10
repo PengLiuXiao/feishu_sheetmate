@@ -8,7 +8,12 @@ const VIDEO_EXTENSIONS = new Set(["mp4", "webm", "ogg", "mov", "m4v", "m3u8", "a
 const FEISHU_MEDIA_HOST_PATTERN = /(?:^|\.)((feishu\.cn)|(larksuite\.com)|(larkoffice\.com))$/i;
 const FEISHU_IMAGE_HINT_PATTERN = /\b(image|img|photo|picture|thumbnail|thumb|cover|avatar|snapshot)\b/i;
 const FEISHU_VIDEO_HINT_PATTERN = /\b(video|stream|vod|media|playback)\b/i;
+const YOUTUBE_HOST_PATTERN = /(?:^|\.)youtube\.com$/i;
+const YOUTUBE_SHORT_HOST_PATTERN = /(?:^|\.)youtu\.be$/i;
+const BILIBILI_HOST_PATTERN = /(?:^|\.)bilibili\.com$/i;
 const STALE_SCRIPT_HINT_DELAY_MS = 12000;
+const CONTENT_SCRIPT_REQUEST_COOLDOWN_MS = 1500;
+const SHEET_MATE_TEST_MODE = globalThis.__SHEET_MATE_TEST__ === true;
 
 const DEFAULT_STATE = {
   layout: "single",
@@ -31,6 +36,7 @@ let captureStatus = null;
 let hydrateVersion = 0;
 let lastSupportState = "";
 let supportStateSince = Date.now();
+const contentScriptInjectionRequestAtByTab = new Map();
 
 const board = document.getElementById("board");
 const statusbar = document.getElementById("statusbar");
@@ -49,7 +55,9 @@ const paneElements = new Map(
   ])
 );
 
-initialize();
+if (!SHEET_MATE_TEST_MODE) {
+  initialize();
+}
 
 function initialize() {
   bindEvents();
@@ -70,7 +78,7 @@ function bindEvents() {
 
     pane.root.addEventListener("click", (event) => {
       const target = event.target instanceof Element ? event.target : null;
-      const interactiveTarget = target?.closest("a, select, option, video");
+      const interactiveTarget = target?.closest("a, select, option, video, iframe");
       if (interactiveTarget) {
         return;
       }
@@ -158,6 +166,7 @@ function hydrateStateForActiveTab() {
       }
 
       render();
+      requestContentScriptInjection(currentTab?.id, getPageSupportState());
       }
     );
   });
@@ -194,7 +203,11 @@ function isFeishuWorkspaceUrl(url) {
 
   try {
     const parsed = new URL(url);
-    return /(?:^|\.)feishu\.cn$/i.test(parsed.hostname) || /(?:^|\.)larksuite\.com$/i.test(parsed.hostname);
+    return (
+      /(?:^|\.)feishu\.cn$/i.test(parsed.hostname) ||
+      /(?:^|\.)larksuite\.com$/i.test(parsed.hostname) ||
+      /(?:^|\.)larkoffice\.com$/i.test(parsed.hostname)
+    );
   } catch {
     return false;
   }
@@ -226,6 +239,41 @@ function getPageSupportState() {
 
 function canInteractWithCurrentTab() {
   return Boolean(currentTab?.id) && isFeishuWorkspaceUrl(currentTab.url);
+}
+
+function getCurrentPageUrl() {
+  if (typeof captureStatus?.url === "string" && captureStatus.url) {
+    return captureStatus.url;
+  }
+
+  return typeof currentTab?.url === "string" ? currentTab.url : "";
+}
+
+function getCurrentPageSessionKey() {
+  return typeof captureStatus?.pageSessionKey === "string" ? captureStatus.pageSessionKey : "";
+}
+
+function isSnapshotStaleForPane(paneId, snapshot) {
+  if (paneId !== state.activePaneId || !snapshot) {
+    return false;
+  }
+
+  const currentPageUrl = getCurrentPageUrl();
+  const supportState = getPageSupportState();
+  if (!currentPageUrl || !isFeishuWorkspaceUrl(currentPageUrl)) {
+    return false;
+  }
+
+  if (supportState !== "supported-page" && supportState !== "supported-shell") {
+    return false;
+  }
+
+  const currentPageSessionKey = getCurrentPageSessionKey();
+  if (currentPageSessionKey && snapshot.pageSessionKey) {
+    return snapshot.pageSessionKey !== currentPageSessionKey;
+  }
+
+  return Boolean(snapshot.url) && snapshot.url !== currentPageUrl;
 }
 
 function shouldShowStaleScriptHint(supportState) {
@@ -294,6 +342,32 @@ function applyCaptureStatus(nextStatus) {
   render();
 }
 
+function requestContentScriptInjection(tabId, supportState = getPageSupportState()) {
+  if (!Number.isInteger(tabId) || !canInteractWithCurrentTab()) {
+    return;
+  }
+
+  if (supportState !== "script-not-ready" && supportState !== "detecting-page") {
+    return;
+  }
+
+  const lastRequestedAt = contentScriptInjectionRequestAtByTab.get(tabId) || 0;
+  if (Date.now() - lastRequestedAt < CONTENT_SCRIPT_REQUEST_COOLDOWN_MS) {
+    return;
+  }
+
+  contentScriptInjectionRequestAtByTab.set(tabId, Date.now());
+  chrome.runtime.sendMessage(
+    {
+      type: "ENSURE_CONTENT_SCRIPT",
+      payload: { tabId }
+    },
+    () => {
+      void chrome.runtime.lastError;
+    }
+  );
+}
+
 function persistAndRender() {
   render();
 
@@ -351,11 +425,13 @@ function render() {
   }
 
   statusbar.textContent = buildStatusMessage();
+  requestContentScriptInjection(currentTab?.id, supportState);
 }
 
 function renderPaneMeta(paneId, paneState) {
   const pane = paneElements.get(paneId);
   const snapshot = paneState.snapshot;
+  const isStaleSnapshot = isSnapshotStaleForPane(paneId, snapshot);
   const shouldShowBindingHint = paneId !== state.activePaneId && hasAnyPaneSnapshot();
   const supportState = getPageSupportState();
   const staleScriptOrNotInjected = shouldShowStaleScriptHint(supportState);
@@ -366,7 +442,9 @@ function renderPaneMeta(paneId, paneState) {
   }
 
   if (supportState === "outside-feishu") {
-    pane.meta.textContent = "当前不是飞书工作区页面，切回飞书标签页后会恢复同步。";
+    pane.meta.textContent = snapshot
+      ? "当前不是飞书表格页面，先保留这份内容；切回飞书表格后会恢复同步。"
+      : "当前不是飞书工作区页面，切回飞书标签页后会恢复同步。";
     return;
   }
 
@@ -382,9 +460,19 @@ function renderPaneMeta(paneId, paneState) {
   }
 
   if (supportState === "supported-shell") {
+    if (isStaleSnapshot) {
+      pane.meta.textContent = "已进入新的飞书表格，正在等待当前选中单元格稳定后自动同步。";
+      return;
+    }
+
     pane.meta.textContent = snapshot
       ? "已识别到飞书表格容器，正在等待新的名称框、公式栏或活动单元格信号；当前内容先保留。"
       : "已识别到飞书表格容器，等待名称框、公式栏或活动单元格稳定后自动抓取。";
+    return;
+  }
+
+  if (isStaleSnapshot) {
+    pane.meta.textContent = "已切换到新的飞书表格，等待当前选中的单元格内容。";
     return;
   }
 
@@ -421,6 +509,7 @@ function renderPaneMeta(paneId, paneState) {
 function renderPaneContent(container, paneState) {
   container.replaceChildren();
   const paneId = Array.from(paneElements.entries()).find(([, pane]) => pane.content === container)?.[0] || null;
+  const isStaleSnapshot = paneId ? isSnapshotStaleForPane(paneId, paneState.snapshot) : false;
   const shouldShowBindingHint = paneId && paneId !== state.activePaneId && hasAnyPaneSnapshot();
   const supportState = getPageSupportState();
   const staleScriptOrNotInjected = shouldShowStaleScriptHint(supportState);
@@ -436,6 +525,12 @@ function renderPaneContent(container, paneState) {
   }
 
   if (supportState === "outside-feishu") {
+    if (paneState.snapshot) {
+      const preview = renderPreview(paneState.snapshot, paneState.mode);
+      container.appendChild(preview);
+      return;
+    }
+
     container.appendChild(
       createEmptyState(
         "当前不是飞书工作区页面",
@@ -464,6 +559,16 @@ function renderPaneContent(container, paneState) {
   }
 
   if (supportState === "supported-shell") {
+    if (isStaleSnapshot) {
+      container.appendChild(
+        createEmptyState(
+          "正在等待新表格的当前选区",
+          "已经切换到新的飞书表格，名称框、公式栏或活动单元格稳定后会自动渲染。"
+        )
+      );
+      return;
+    }
+
     if (paneState.snapshot) {
       const preview = renderPreview(paneState.snapshot, paneState.mode);
       container.appendChild(preview);
@@ -491,6 +596,16 @@ function renderPaneContent(container, paneState) {
       createEmptyState(
         "当前页面不是可预览的飞书表格",
         captureStatus?.lastSupportReason || "当前页面未识别到表格网格、名称框或公式栏锚点。"
+      )
+    );
+    return;
+  }
+
+  if (isStaleSnapshot) {
+    container.appendChild(
+      createEmptyState(
+        "正在等待新表格的当前选区",
+        "已经进入新的飞书表格，侧边栏会直接渲染这个表格当前选中的单元格。"
       )
     );
     return;
@@ -580,7 +695,7 @@ function buildStatusMessage() {
   }
 
   if (supportState === "outside-feishu") {
-    return "当前活动标签页不是飞书页面。请切回飞书标签页后，侧边栏会继续按当前标签页同步内容。";
+    return "当前活动标签页不是飞书页面。若已有内容会先保留，切回飞书标签页后侧边栏会继续同步。";
   }
 
   const title = currentTab.title ? `当前标签页：${currentTab.title}；` : "";
@@ -601,6 +716,10 @@ function buildStatusMessage() {
   }
 
   const activePane = state.panes[state.activePaneId];
+  if (isSnapshotStaleForPane(state.activePaneId, activePane.snapshot)) {
+    return `${title}已切换到新的飞书表格，等待当前选中单元格同步。${diagnosticMessage}`;
+  }
+
   if (!activePane.snapshot) {
     return `${title}内容脚本已连上，但还没抓到单元格。${diagnosticMessage}`;
   }
@@ -794,37 +913,46 @@ function extractMediaItems(rawContent) {
       continue;
     }
 
-    items.set(safeUrl, {
-      url: safeUrl,
-      type: classifyMediaUrl(safeUrl)
-    });
+    items.set(safeUrl, resolveMediaItem(safeUrl));
   }
 
   return Array.from(items.values());
 }
 
-function classifyMediaUrl(url) {
+function resolveMediaItem(url) {
+  const fallback = { url, type: "unknown" };
+
   try {
     const parsed = new URL(url);
     if (!/^https?:$/.test(parsed.protocol)) {
-      return "unknown";
+      return fallback;
     }
 
     for (const candidate of collectFilenameCandidates(parsed)) {
       const type = inferMediaTypeFromName(candidate);
       if (type !== "unknown") {
-        return type;
+        return { url, type };
       }
     }
 
     const mimeType = inferMediaTypeFromQuery(parsed);
     if (mimeType !== "unknown") {
-      return mimeType;
+      return { url, type: mimeType };
     }
 
-    return inferFeishuMediaType(parsed);
+    const feishuType = inferFeishuMediaType(parsed);
+    if (feishuType !== "unknown") {
+      return { url, type: feishuType };
+    }
+
+    const platformVideo = inferPlatformVideo(parsed);
+    if (platformVideo) {
+      return platformVideo;
+    }
+
+    return fallback;
   } catch {
-    return "unknown";
+    return fallback;
   }
 }
 
@@ -902,6 +1030,124 @@ function inferFeishuMediaType(parsed) {
   }
 
   return "unknown";
+}
+
+function inferPlatformVideo(parsed) {
+  return inferYouTubeVideo(parsed) || inferBilibiliVideo(parsed);
+}
+
+function inferYouTubeVideo(parsed) {
+  const hostname = parsed.hostname.toLowerCase();
+  let videoId = "";
+
+  if (YOUTUBE_SHORT_HOST_PATTERN.test(hostname)) {
+    videoId = parsed.pathname.split("/").filter(Boolean)[0] || "";
+  } else if (YOUTUBE_HOST_PATTERN.test(hostname)) {
+    const pathSegments = parsed.pathname.split("/").filter(Boolean);
+
+    if (parsed.pathname === "/watch") {
+      videoId = parsed.searchParams.get("v") || "";
+    } else if (pathSegments[0] === "shorts" || pathSegments[0] === "embed") {
+      videoId = pathSegments[1] || "";
+    }
+  }
+
+  if (!isLikelyYouTubeVideoId(videoId)) {
+    return null;
+  }
+
+  return createBlockedPlatformVideoItem(parsed.href, "youtube", "unsupported_embed_policy");
+}
+
+function inferBilibiliVideo(parsed) {
+  if (!BILIBILI_HOST_PATTERN.test(parsed.hostname)) {
+    return null;
+  }
+
+  const pathSegments = parsed.pathname.split("/").filter(Boolean);
+  if (pathSegments[0] !== "video") {
+    return null;
+  }
+
+  const identifier = pathSegments[1] || "";
+  const isBvid = /^BV[0-9A-Za-z]+$/.test(identifier);
+  const avMatch = identifier.match(/^av(\d+)$/i);
+
+  if (!isBvid && !avMatch) {
+    return null;
+  }
+
+  return createBlockedPlatformVideoItem(parsed.href, "bilibili", "platform_page_blocked");
+}
+
+function isLikelyYouTubeVideoId(value) {
+  return /^[A-Za-z0-9_-]{6,}$/.test(String(value || ""));
+}
+
+function isEmbeddableMediaItem(item) {
+  return Boolean(item) && (item.type === "image" || item.type === "video");
+}
+
+function createBlockedPlatformVideoItem(openUrl, provider, reasonCode) {
+  return {
+    url: openUrl,
+    type: "platform_video_blocked",
+    provider,
+    reasonCode,
+    reasonText: platformBlockedReason(provider, reasonCode),
+    openUrl
+  };
+}
+
+function platformBlockedReason(provider, reasonCode) {
+  const providerLabel = platformLabel(provider);
+
+  switch (reasonCode) {
+    case "unsupported_embed_policy":
+      return `${providerLabel} 对嵌入来源或播放器环境有限制，当前侧边栏不直接播放该平台视频。`;
+    case "platform_page_blocked":
+    default:
+      return `${providerLabel} 视频页为了稳定性和一致性不在侧边栏内播放，请打开原页面查看。`;
+  }
+}
+
+function platformLabel(provider) {
+  switch (provider) {
+    case "youtube":
+      return "YouTube";
+    case "bilibili":
+      return "Bilibili";
+    default:
+      return "当前平台";
+  }
+}
+
+function isBlockedPlatformVideo(item) {
+  return Boolean(item) && item.type === "platform_video_blocked";
+}
+
+function isUnknownMediaItem(item) {
+  return Boolean(item) && item.type === "unknown";
+}
+
+function renderBlockedPlatformCard(item) {
+  const card = createElement("article", "media-card");
+  const note = createWarningCard(item.reasonText);
+  card.appendChild(note);
+
+  const summary = createElement("p", "media-card__summary");
+  summary.textContent = `${platformLabel(item.provider)} 链接已识别，但按当前策略不在侧边栏内播放。`;
+  card.appendChild(summary);
+
+  const openLink = createExternalLink("打开原页面", item.openUrl || item.url);
+  openLink.className = "media-card__action";
+  card.appendChild(openLink);
+
+  const sourceLink = createExternalLink(item.url, item.url);
+  sourceLink.className = "media-card__url";
+  card.appendChild(sourceLink);
+
+  return card;
 }
 
 function renderTextBlock(rawContent) {
@@ -1001,8 +1247,9 @@ function parseLatexPayload(rawContent) {
 
 function renderMediaBlock(mediaItems, rawContent) {
   const wrapper = createElement("section", "media-grid");
-  const embeddableItems = mediaItems.filter((item) => item.type !== "unknown");
-  const linkOnlyItems = mediaItems.filter((item) => item.type === "unknown");
+  const embeddableItems = mediaItems.filter((item) => isEmbeddableMediaItem(item));
+  const blockedPlatformItems = mediaItems.filter((item) => isBlockedPlatformVideo(item));
+  const linkOnlyItems = mediaItems.filter((item) => isUnknownMediaItem(item));
 
   if (!mediaItems.length) {
     wrapper.appendChild(createWarningCard("没有识别出可直接嵌入的图片或视频链接，下面展示原始文本。"));
@@ -1010,7 +1257,7 @@ function renderMediaBlock(mediaItems, rawContent) {
     return wrapper;
   }
 
-  if (!embeddableItems.length) {
+  if (!embeddableItems.length && !blockedPlatformItems.length) {
     wrapper.appendChild(createWarningCard("识别到了链接，但暂时无法安全嵌入，下面保留原始链接和原文。"));
   }
 
@@ -1037,6 +1284,10 @@ function renderMediaBlock(mediaItems, rawContent) {
     link.className = "media-card__url";
     card.appendChild(link);
     wrapper.appendChild(card);
+  }
+
+  for (const item of blockedPlatformItems) {
+    wrapper.appendChild(renderBlockedPlatformCard(item));
   }
 
   if (linkOnlyItems.length) {
@@ -1385,6 +1636,7 @@ function normalizeSnapshot(input) {
   const source = typeof input.source === "string" && input.source.trim() ? input.source.trim() : "unknown";
   const pageTitle = typeof input.pageTitle === "string" ? sanitizeInlineText(input.pageTitle) : "";
   const url = typeof input.url === "string" ? input.url : "";
+  const pageSessionKey = typeof input.pageSessionKey === "string" ? input.pageSessionKey.trim() : "";
   const capturedAt = Number.isFinite(input.capturedAt) ? input.capturedAt : null;
   const tabId = Number.isInteger(input.tabId) ? input.tabId : null;
 
@@ -1394,6 +1646,7 @@ function normalizeSnapshot(input) {
     source,
     pageTitle,
     url,
+    pageSessionKey,
     capturedAt,
     tabId
   };
@@ -1422,6 +1675,79 @@ function normalizeCaptureStatus(input) {
           ? input.supportReason.trim()
           : "",
     pageTitle: typeof input.pageTitle === "string" ? sanitizeInlineText(input.pageTitle) : "",
-    url: typeof input.url === "string" ? input.url : ""
+    url: typeof input.url === "string" ? input.url : "",
+    pageSessionKey: typeof input.pageSessionKey === "string" ? input.pageSessionKey.trim() : ""
   };
 }
+
+function setTestRuntimeState(nextState = {}) {
+  if ("state" in nextState) {
+    state = mergeState(nextState.state);
+  }
+
+  if ("currentTab" in nextState) {
+    currentTab = nextState.currentTab ? normalizeTab(nextState.currentTab) : null;
+  }
+
+  if ("captureStatus" in nextState) {
+    captureStatus = normalizeCaptureStatus(nextState.captureStatus);
+  }
+
+  if ("lastSupportState" in nextState) {
+    lastSupportState = String(nextState.lastSupportState || "");
+  }
+
+  if ("supportStateSince" in nextState) {
+    supportStateSince = Number.isFinite(nextState.supportStateSince) ? nextState.supportStateSince : Date.now();
+  }
+}
+
+function getTestRuntimeState() {
+  return {
+    state,
+    currentTab,
+    captureStatus,
+    lastSupportState,
+    supportStateSince
+  };
+}
+
+function exposeSidepanelTestExports() {
+  if (!SHEET_MATE_TEST_MODE) {
+    return;
+  }
+
+  const root = globalThis.__sheetMateTestExports || (globalThis.__sheetMateTestExports = {});
+  root.sidepanel = {
+    buildExplicitMediaWarning,
+    extractMediaItems,
+    inferBilibiliVideo,
+    inferContentKind,
+    inferFeishuMediaType,
+    inferMediaTypeFromName,
+    inferMediaTypeFromQuery,
+    inferYouTubeVideo,
+    getCurrentPageUrl,
+    getCurrentPageSessionKey,
+    isSnapshotStaleForPane,
+    looksLikeJson,
+    looksLikeLatex,
+    looksLikeMarkdown,
+    mergeState,
+    normalizeCaptureStatus,
+    normalizeSnapshot,
+    parseLatexPayload,
+    renderJsonBlock,
+    renderLatexBlock,
+    renderMediaBlock,
+    renderPreview,
+    requestContentScriptInjection,
+    resolveMediaItem,
+    sanitizeUrl,
+    setTestRuntimeState,
+    getTestRuntimeState,
+    render
+  };
+}
+
+exposeSidepanelTestExports();

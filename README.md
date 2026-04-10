@@ -2,6 +2,12 @@
 
 一个无需构建步骤的 Chrome Manifest V3 插件，用来在飞书表格页面里预览当前单元格内容。
 
+当前支持的飞书工作区域名：
+
+- `*.feishu.cn`
+- `*.larksuite.com`
+- `*.larkoffice.com`
+
 ## 当前能力
 
 - 侧边栏单栏、左右分屏、上下分屏
@@ -13,7 +19,8 @@
   - Markdown
   - JSON
   - LaTeX（本地 KaTeX 渲染）
-  - 图片、视频链接
+  - 图片、视频直链
+  - 视频平台页面链接识别与原因提示
 - 支持显式切换渲染模式：
   - 自动识别
   - 纯文本
@@ -36,7 +43,14 @@
 2. 打开右上角“开发者模式”
 3. 点击“加载已解压的扩展程序”
 4. 选择当前目录：`/Users/vincentliu/Coding/Byte_Work/feishu_sheetmate`
-5. 打开飞书表格页面，点击插件图标即可打开侧边栏
+5. 打开飞书表格页面
+6. 点击插件图标即可打开侧边栏
+
+支持以上三类域名下的飞书表格页面，例如：
+
+- `https://xxx.feishu.cn/sheets/...`
+- `https://xxx.larksuite.com/sheets/...`
+- `https://xxx.larkoffice.com/sheets/...`
 
 ## 交互规则
 
@@ -69,6 +83,13 @@
   - Markdown 图片语法中的链接
   - 常见飞书 / Lark 媒体链接
   - 带 `filename` / `name` 等参数且能推断扩展名的链接
-- 无法安全嵌入的链接会保留为可点击外链，不会做代理转发
+- 当前会识别并说明原因的平台视频页：
+  - YouTube 标准视频链接：`watch` / `youtu.be` / `shorts` / `embed`
+  - Bilibili 标准视频链接：`/video/BV...` / `/video/av...`
+- 当前不处理：
+  - YouTube playlist / channel / live 专门解析
+  - Bilibili `b23.tv` 短链、番剧、课程等非标准视频页
+- 视频平台页面链接默认不在侧边栏内播放，会显示原因说明和原页面入口
+- 无法安全嵌入的其他链接会保留为可点击外链，不会做代理转发，也不会透传任意 iframe 地址
 - 飞书页面 DOM 如果发生较大调整，可能需要补充选择器
 - 浏览器重启后不会恢复上一次会话中的冻结内容，这些状态仅保存在当前浏览器会话内

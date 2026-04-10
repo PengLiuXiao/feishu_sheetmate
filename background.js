@@ -1,6 +1,10 @@
 const SNAPSHOT_KEY_PREFIX = "sheetMateSnapshot:";
 const PANEL_STATE_KEY_PREFIX = "sheetMatePanelState:";
 const CAPTURE_STATUS_KEY_PREFIX = "sheetMateCaptureStatus:";
+const SHEET_MATE_TEST_MODE = globalThis.__SHEET_MATE_TEST__ === true;
+const CONTENT_SCRIPT_FILE = "content-script.js";
+
+let backgroundInitialized = false;
 
 function configureSidePanelBehavior() {
   chrome.sidePanel
@@ -26,6 +30,69 @@ function normalizeText(value) {
   return typeof value === "string" ? value.trim() : "";
 }
 
+function isFeishuWorkspaceUrl(url) {
+  if (!url) {
+    return false;
+  }
+
+  try {
+    const parsed = new URL(url);
+    return (
+      /(?:^|\.)feishu\.cn$/i.test(parsed.hostname) ||
+      /(?:^|\.)larksuite\.com$/i.test(parsed.hostname) ||
+      /(?:^|\.)larkoffice\.com$/i.test(parsed.hostname)
+    );
+  } catch {
+    return false;
+  }
+}
+
+function isInjectableFeishuTab(tab) {
+  return Boolean(
+    tab &&
+      Number.isInteger(tab.id) &&
+      typeof tab.url === "string" &&
+      /^https?:/i.test(tab.url) &&
+      isFeishuWorkspaceUrl(tab.url)
+  );
+}
+
+function injectContentScript(tabId) {
+  if (!Number.isInteger(tabId)) {
+    return Promise.resolve({ ok: false, reason: "invalid-tab-id" });
+  }
+
+  return Promise.resolve(
+    chrome.scripting.executeScript({
+      target: { tabId },
+      files: [CONTENT_SCRIPT_FILE]
+    })
+  )
+    .then(() => ({ ok: true }))
+    .catch((error) => ({
+      ok: false,
+      reason: normalizeText(error?.message || error) || "inject-failed"
+    }));
+}
+
+function injectOpenFeishuTabs() {
+  try {
+    chrome.tabs.query({}, (tabs) => {
+      void chrome.runtime.lastError;
+
+      for (const tab of tabs || []) {
+        if (!isInjectableFeishuTab(tab)) {
+          continue;
+        }
+
+        void injectContentScript(tab.id);
+      }
+    });
+  } catch {
+    // 某些测试或受限环境里 tabs.query 可能不存在，这里静默跳过。
+  }
+}
+
 function mergeCaptureStatus(previous, patch) {
   return {
     ready: patch.ready ?? previous?.ready ?? false,
@@ -40,7 +107,8 @@ function mergeCaptureStatus(previous, patch) {
     pageSupported: patch.pageSupported ?? previous?.pageSupported ?? null,
     lastSupportReason: normalizeText(patch.supportReason) || normalizeText(patch.lastSupportReason) || previous?.lastSupportReason || "",
     pageTitle: normalizeText(patch.pageTitle) || previous?.pageTitle || "",
-    url: normalizeText(patch.url) || previous?.url || ""
+    url: normalizeText(patch.url) || previous?.url || "",
+    pageSessionKey: normalizeText(patch.pageSessionKey) || previous?.pageSessionKey || ""
   };
 }
 
@@ -64,6 +132,7 @@ function buildSnapshotPayload(tabId, payload) {
     source: normalizeText(payload.source) || "unknown",
     pageTitle: normalizeText(payload.pageTitle),
     url: normalizeText(payload.url),
+    pageSessionKey: normalizeText(payload.pageSessionKey),
     pageKind: normalizeText(payload.pageKind),
     pageSupported: payload.pageSupported ?? null,
     supportReason: normalizeText(payload.supportReason),
@@ -96,7 +165,8 @@ function handleContentScriptReady(tabId, payload, sendResponse) {
       pageSupported: payload.pageSupported,
       supportReason: payload.supportReason,
       pageTitle: payload.pageTitle,
-      url: payload.url
+      url: payload.url,
+      pageSessionKey: payload.pageSessionKey
     },
     () => {
       sendResponse({ ok: true });
@@ -117,7 +187,8 @@ function handleCaptureStatus(tabId, payload, sendResponse) {
       pageSupported: payload.pageSupported,
       supportReason: payload.supportReason,
       pageTitle: payload.pageTitle,
-      url: payload.url
+      url: payload.url,
+      pageSessionKey: payload.pageSessionKey
     },
     () => {
       sendResponse({ ok: true });
@@ -144,7 +215,8 @@ function handleCellSnapshot(tabId, payload, sendResponse) {
         pageSupported: snapshot.pageSupported,
         supportReason: snapshot.supportReason,
         pageTitle: snapshot.pageTitle,
-        url: snapshot.url
+        url: snapshot.url,
+        pageSessionKey: snapshot.pageSessionKey
       },
       () => {
         sendResponse({ ok: true });
@@ -153,44 +225,107 @@ function handleCellSnapshot(tabId, payload, sendResponse) {
   });
 }
 
-chrome.runtime.onInstalled.addListener(() => {
-  configureSidePanelBehavior();
-});
-
-chrome.runtime.onStartup.addListener(() => {
-  configureSidePanelBehavior();
-});
-
-chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  const tabId = getMessageTabId(sender);
+function handleEnsureContentScript(message, sendResponse) {
+  const tabId = Number.isInteger(message?.payload?.tabId) ? message.payload.tabId : null;
   if (!Number.isInteger(tabId)) {
-    return undefined;
+    sendResponse({ ok: false, reason: "invalid-tab-id" });
+    return;
   }
 
-  switch (message?.type) {
-    case "CONTENT_SCRIPT_READY":
-      handleContentScriptReady(tabId, message.payload || {}, sendResponse);
-      return true;
-    case "CAPTURE_STATUS":
-      handleCaptureStatus(tabId, message.payload || {}, sendResponse);
-      return true;
-    case "CELL_SNAPSHOT":
-      if (!message.payload) {
-        return undefined;
+  injectContentScript(tabId).then(sendResponse);
+}
+
+function initializeBackgroundRuntime() {
+  if (backgroundInitialized) {
+    return;
+  }
+
+  backgroundInitialized = true;
+
+  chrome.runtime.onInstalled.addListener(() => {
+    configureSidePanelBehavior();
+    injectOpenFeishuTabs();
+  });
+
+  chrome.runtime.onStartup.addListener(() => {
+    configureSidePanelBehavior();
+    injectOpenFeishuTabs();
+  });
+
+  chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+    switch (message?.type) {
+      case "ENSURE_CONTENT_SCRIPT":
+        handleEnsureContentScript(message, sendResponse);
+        return true;
+      case "CONTENT_SCRIPT_READY":
+      case "CAPTURE_STATUS":
+      case "CELL_SNAPSHOT": {
+        const tabId = getMessageTabId(sender);
+        if (!Number.isInteger(tabId)) {
+          return undefined;
+        }
+
+        if (message?.type === "CONTENT_SCRIPT_READY") {
+          handleContentScriptReady(tabId, message.payload || {}, sendResponse);
+          return true;
+        }
+
+        if (message?.type === "CAPTURE_STATUS") {
+          handleCaptureStatus(tabId, message.payload || {}, sendResponse);
+          return true;
+        }
+
+        if (!message.payload) {
+          return undefined;
+        }
+
+        handleCellSnapshot(tabId, message.payload, sendResponse);
+        return true;
       }
-
-      handleCellSnapshot(tabId, message.payload, sendResponse);
-      return true;
-    default:
-      return undefined;
-  }
-});
-
-chrome.tabs.onRemoved.addListener((tabId) => {
-  chrome.storage.session.remove(
-    [getSnapshotKey(tabId), getPanelStateKey(tabId), getCaptureStatusKey(tabId)],
-    () => {
-      void chrome.runtime.lastError;
+      default:
+        return undefined;
     }
-  );
-});
+  });
+
+  chrome.tabs.onRemoved.addListener((tabId) => {
+    chrome.storage.session.remove(
+      [getSnapshotKey(tabId), getPanelStateKey(tabId), getCaptureStatusKey(tabId)],
+      () => {
+        void chrome.runtime.lastError;
+      }
+    );
+  });
+}
+
+function exposeBackgroundTestExports() {
+  if (!SHEET_MATE_TEST_MODE) {
+    return;
+  }
+
+  const root = globalThis.__sheetMateTestExports || (globalThis.__sheetMateTestExports = {});
+  root.background = {
+    buildSnapshotPayload,
+    getCaptureStatusKey,
+    getMessageTabId,
+    getPanelStateKey,
+    getSnapshotKey,
+    handleCaptureStatus,
+    handleCellSnapshot,
+    handleContentScriptReady,
+    handleEnsureContentScript,
+    injectContentScript,
+    injectOpenFeishuTabs,
+    initializeBackgroundRuntime,
+    isFeishuWorkspaceUrl,
+    isInjectableFeishuTab,
+    mergeCaptureStatus,
+    normalizeText,
+    updateCaptureStatus
+  };
+}
+
+exposeBackgroundTestExports();
+
+if (!SHEET_MATE_TEST_MODE) {
+  initializeBackgroundRuntime();
+}
