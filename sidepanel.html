@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Feishu SheetMate Preview</title>
+    <link rel="stylesheet" href="vendor/katex/katex.min.css">
+    <link rel="stylesheet" href="sidepanel.css">
+    <script src="vendor/katex/katex.min.js" defer></script>
+    <script src="sidepanel.js" defer></script>
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="toolbar">
+        <div class="toolbar__main">
+          <p class="toolbar__eyebrow">Feishu SheetMate</p>
+          <h1>飞书单元格预览</h1>
+          <p class="toolbar__description">点击分栏即可切换“跟随当前选区”的目标，其余分栏会保持现有内容不变。</p>
+        </div>
+        <div class="layout-switch" aria-label="切换布局">
+          <button class="layout-switch__button" data-layout="single" type="button">单栏</button>
+          <button class="layout-switch__button" data-layout="columns" type="button">左右分屏</button>
+          <button class="layout-switch__button" data-layout="rows" type="button">上下分屏</button>
+        </div>
+      </header>
+
+      <main class="board" data-layout="single" id="board">
+        <section class="pane" data-pane-id="paneA">
+          <button class="pane__header" type="button">
+            <span>
+              <strong class="pane__title">分栏 A</strong>
+              <span class="pane__subtitle">当前跟随选中的单元格</span>
+            </span>
+            <span class="pane__badge">跟随中</span>
+          </button>
+          <div class="pane__controls">
+            <label class="pane__label">
+              渲染模式
+              <select class="mode-select" data-pane-id="paneA">
+                <option value="auto">自动识别</option>
+                <option value="text">纯文本</option>
+                <option value="markdown">Markdown</option>
+                <option value="json">JSON</option>
+                <option value="latex">LaTeX</option>
+                <option value="media">媒体链接</option>
+              </select>
+            </label>
+            <p class="pane__meta">等待飞书表格中的单元格选区…</p>
+          </div>
+          <div class="pane__content" data-pane-content="paneA"></div>
+        </section>
+
+        <section class="pane" data-pane-id="paneB">
+          <button class="pane__header" type="button">
+            <span>
+              <strong class="pane__title">分栏 B</strong>
+              <span class="pane__subtitle">点击这里后，后续选区会同步到本分栏</span>
+            </span>
+            <span class="pane__badge">冻结中</span>
+          </button>
+          <div class="pane__controls">
+            <label class="pane__label">
+              渲染模式
+              <select class="mode-select" data-pane-id="paneB">
+                <option value="auto">自动识别</option>
+                <option value="text">纯文本</option>
+                <option value="markdown">Markdown</option>
+                <option value="json">JSON</option>
+                <option value="latex">LaTeX</option>
+                <option value="media">媒体链接</option>
+              </select>
+            </label>
+            <p class="pane__meta">等待飞书表格中的单元格选区…</p>
+          </div>
+          <div class="pane__content" data-pane-content="paneB"></div>
+        </section>
+      </main>
+
+      <footer class="statusbar" id="statusbar">
+        请打开飞书表格并选择一个单元格，侧边栏会自动同步到当前激活分栏。
+      </footer>
+    </div>
+  </body>
+</html>

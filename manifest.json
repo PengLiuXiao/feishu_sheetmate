@@ -1,0 +1,36 @@
+{
+  "manifest_version": 3,
+  "name": "Feishu SheetMate Preview",
+  "description": "在飞书表格中预览单元格内容，支持侧边栏单栏、左右分屏、上下分屏以及多种内容类型渲染。",
+  "version": "0.1.0",
+  "permissions": [
+    "storage",
+    "sidePanel",
+    "tabs"
+  ],
+  "host_permissions": [
+    "https://*.feishu.cn/*",
+    "https://*.larksuite.com/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_title": "打开飞书表格预览"
+  },
+  "side_panel": {
+    "default_path": "sidepanel.html"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://*.feishu.cn/*",
+        "https://*.larksuite.com/*"
+      ],
+      "js": [
+        "content-script.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ]
+}
