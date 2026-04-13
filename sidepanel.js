@@ -39,7 +39,6 @@ let supportStateSince = Date.now();
 const contentScriptInjectionRequestAtByTab = new Map();
 
 const board = document.getElementById("board");
-const statusbar = document.getElementById("statusbar");
 const layoutButtons = Array.from(document.querySelectorAll("[data-layout]"));
 const paneElements = new Map(
   Array.from(document.querySelectorAll(".pane")).map((element) => [
@@ -424,7 +423,6 @@ function render() {
     renderPaneContent(pane.content, paneState);
   }
 
-  statusbar.textContent = buildStatusMessage();
   requestContentScriptInjection(currentTab?.id, supportState);
 }
 
@@ -437,73 +435,48 @@ function renderPaneMeta(paneId, paneState) {
   const staleScriptOrNotInjected = shouldShowStaleScriptHint(supportState);
 
   if (supportState === "no-tab") {
-    pane.meta.textContent = "正在识别当前 Chrome 活动标签页…";
+    pane.meta.textContent = "等待";
     return;
   }
 
   if (supportState === "outside-feishu") {
-    pane.meta.textContent = snapshot
-      ? "当前不是飞书表格页面，先保留这份内容；切回飞书表格后会恢复同步。"
-      : "当前不是飞书工作区页面，切回飞书标签页后会恢复同步。";
+    pane.meta.textContent = snapshot ? "已保留" : "未支持";
     return;
   }
 
   if (supportState === "script-not-ready" || supportState === "detecting-page") {
-    pane.meta.textContent = snapshot
-      ? staleScriptOrNotInjected
-        ? "当前页脚本需要重新注入，先保留这份内容；刷新飞书页面后会恢复同步。"
-        : "内容脚本尚未连上当前飞书页面，先保留这份内容。"
-      : staleScriptOrNotInjected
-        ? "扩展可能刚更新，请刷新当前页面重新注入内容脚本。"
-        : "内容脚本尚未连上当前飞书页面。";
+    pane.meta.textContent = snapshot ? "已保留" : staleScriptOrNotInjected ? "待重连" : "未连接";
     return;
   }
 
   if (supportState === "supported-shell") {
     if (isStaleSnapshot) {
-      pane.meta.textContent = "已进入新的飞书表格，正在等待当前选中单元格稳定后自动同步。";
+      pane.meta.textContent = "等待";
       return;
     }
 
-    pane.meta.textContent = snapshot
-      ? "已识别到飞书表格容器，正在等待新的名称框、公式栏或活动单元格信号；当前内容先保留。"
-      : "已识别到飞书表格容器，等待名称框、公式栏或活动单元格稳定后自动抓取。";
+    pane.meta.textContent = snapshot ? "等待" : "待捕获";
     return;
   }
 
   if (isStaleSnapshot) {
-    pane.meta.textContent = "已切换到新的飞书表格，等待当前选中的单元格内容。";
+    pane.meta.textContent = "等待";
     return;
   }
 
   if (supportState === "unsupported-page") {
-    pane.meta.textContent = snapshot
-      ? `当前页暂未识别为可预览表格，先保留最近一次内容。${captureStatus?.lastSupportReason || ""}`.trim()
-      : captureStatus?.lastSupportReason || "当前页面不是可预览的飞书表格页面。";
+    pane.meta.textContent = snapshot ? "已保留" : "未支持";
     return;
   }
 
   if (!snapshot) {
-    if (shouldShowBindingHint) {
-      pane.meta.textContent = "当前分栏还没有绑定内容，点击本分栏后后续选区会同步到这里。";
-      return;
-    }
-
-    if (hasCaptureAttempted(captureStatus)) {
-      pane.meta.textContent = captureStatus.lastExtractorMessage || "最近一次抓取没有命中当前单元格。";
-      return;
-    }
-
-    pane.meta.textContent = "内容脚本已连上，等待第一次抓取单元格内容。";
+    pane.meta.textContent = shouldShowBindingHint ? "空白" : "等待";
     return;
   }
 
   const kindInfo = inferContentKind(snapshot.rawContent, paneState.mode);
-  const capturedTime = snapshot.capturedAt ? ` · ${formatTime(snapshot.capturedAt)}` : "";
-  const cellRef = snapshot.cellRef ? `单元格 ${snapshot.cellRef}` : "单元格坐标未识别";
-  const source = translateSource(snapshot.source);
-
-  pane.meta.textContent = `${cellRef} · ${kindLabel(kindInfo.kind)} · 来源 ${source}${capturedTime}`;
+  const cellRef = snapshot.cellRef || "当前";
+  pane.meta.textContent = `${cellRef} · ${kindLabel(kindInfo.kind)}`;
 }
 
 function renderPaneContent(container, paneState) {
@@ -517,8 +490,7 @@ function renderPaneContent(container, paneState) {
   if (supportState === "no-tab") {
     container.appendChild(
       createEmptyState(
-        "等待识别当前标签页",
-        "侧边栏会跟随当前活动的 Chrome 标签页，并按标签页分别保存分栏状态。"
+        "等待当前标签页"
       )
     );
     return;
@@ -533,8 +505,7 @@ function renderPaneContent(container, paneState) {
 
     container.appendChild(
       createEmptyState(
-        "当前不是飞书工作区页面",
-        "请切回飞书页面后再预览；不同标签页的分栏内容会彼此隔离。"
+        "当前页不可预览"
       )
     );
     return;
@@ -549,10 +520,7 @@ function renderPaneContent(container, paneState) {
 
     container.appendChild(
       createEmptyState(
-        staleScriptOrNotInjected ? "扩展可能刚更新，当前页脚本已失效" : "内容脚本尚未连上当前页面",
-        staleScriptOrNotInjected
-          ? "请刷新当前飞书页面重新注入内容脚本，刷新后会自动恢复抓取。"
-          : "如果你刚刷新过飞书页面，通常几秒内会自动连接；如果始终没有恢复，可刷新飞书页面或重新加载扩展。"
+        staleScriptOrNotInjected ? "待重连" : "未连接"
       )
     );
     return;
@@ -562,8 +530,7 @@ function renderPaneContent(container, paneState) {
     if (isStaleSnapshot) {
       container.appendChild(
         createEmptyState(
-          "正在等待新表格的当前选区",
-          "已经切换到新的飞书表格，名称框、公式栏或活动单元格稳定后会自动渲染。"
+          "等待当前选区"
         )
       );
       return;
@@ -577,9 +544,7 @@ function renderPaneContent(container, paneState) {
 
     container.appendChild(
       createEmptyState(
-        "已识别为飞书表格容器，等待抓取单元格",
-        captureStatus?.lastExtractorMessage ||
-          "页面仍在加载或当前锚点未稳定，继续点击单元格，名称框、公式栏或网格信号出现后会自动恢复同步。"
+        "等待当前选区"
       )
     );
     return;
@@ -594,8 +559,7 @@ function renderPaneContent(container, paneState) {
 
     container.appendChild(
       createEmptyState(
-        "当前页面不是可预览的飞书表格",
-        captureStatus?.lastSupportReason || "当前页面未识别到表格网格、名称框或公式栏锚点。"
+        "当前页不可预览"
       )
     );
     return;
@@ -604,8 +568,7 @@ function renderPaneContent(container, paneState) {
   if (isStaleSnapshot) {
     container.appendChild(
       createEmptyState(
-        "正在等待新表格的当前选区",
-        "已经进入新的飞书表格，侧边栏会直接渲染这个表格当前选中的单元格。"
+        "等待当前选区"
       )
     );
     return;
@@ -615,8 +578,7 @@ function renderPaneContent(container, paneState) {
     if (shouldShowBindingHint) {
       container.appendChild(
         createEmptyState(
-          "当前分栏还没有绑定内容",
-          "点击这个分栏后，它会变成“跟随中”，后续你在飞书里选择的新单元格会同步到这里。"
+          "空白"
         )
       );
       return;
@@ -624,9 +586,7 @@ function renderPaneContent(container, paneState) {
 
     container.appendChild(
       createEmptyState(
-        hasCaptureAttempted(captureStatus) ? "已连上飞书页面，但还没抓到当前单元格" : "内容脚本已连接，等待第一次抓取",
-        captureStatus.lastExtractorMessage ||
-          "如果你已经选中了单元格但没有同步成功，通常只需要再点击一次单元格或进入编辑态。"
+        hasCaptureAttempted(captureStatus) ? "未捕获" : "等待当前选区"
       )
     );
     return;
@@ -635,8 +595,7 @@ function renderPaneContent(container, paneState) {
   if (!paneState.snapshot.rawContent) {
     container.appendChild(
       createEmptyState(
-        paneState.snapshot.cellRef ? `${paneState.snapshot.cellRef} 当前为空` : "当前单元格为空",
-        "空单元格也会被绑定到当前分栏，后续切换到其他分栏后它会保持不变。"
+        paneState.snapshot.cellRef ? `${paneState.snapshot.cellRef} 为空` : "空单元格"
       )
     );
     return;
@@ -687,52 +646,7 @@ function renderPreview(snapshot, mode) {
 }
 
 function buildStatusMessage() {
-  const supportState = getPageSupportState();
-  const staleScriptOrNotInjected = shouldShowStaleScriptHint(supportState);
-
-  if (supportState === "no-tab") {
-    return "正在识别当前活动标签页，识别完成后会按该标签页独立加载分栏状态。";
-  }
-
-  if (supportState === "outside-feishu") {
-    return "当前活动标签页不是飞书页面。若已有内容会先保留，切回飞书标签页后侧边栏会继续同步。";
-  }
-
-  const title = currentTab.title ? `当前标签页：${currentTab.title}；` : "";
-  const diagnosticMessage = buildCaptureDiagnosticMessage();
-
-  if (supportState === "script-not-ready" || supportState === "detecting-page") {
-    return staleScriptOrNotInjected
-      ? `${title}扩展可能刚更新，请刷新当前页面重新注入内容脚本。`
-      : `${title}内容脚本尚未连上当前页面。`;
-  }
-
-  if (supportState === "supported-shell") {
-    return `${title}已识别到飞书表格容器，等待名称框、公式栏或活动单元格稳定。${diagnosticMessage}`;
-  }
-
-  if (supportState === "unsupported-page") {
-    return `${title}当前页面暂未识别到飞书表格锚点；侧边栏仍可操作，并会保留现有内容。${diagnosticMessage}`;
-  }
-
-  const activePane = state.panes[state.activePaneId];
-  if (isSnapshotStaleForPane(state.activePaneId, activePane.snapshot)) {
-    return `${title}已切换到新的飞书表格，等待当前选中单元格同步。${diagnosticMessage}`;
-  }
-
-  if (!activePane.snapshot) {
-    return `${title}内容脚本已连上，但还没抓到单元格。${diagnosticMessage}`;
-  }
-
-  const frozenPaneId = state.activePaneId === "paneA" ? "paneB" : "paneA";
-  const frozenSnapshot = state.panes[frozenPaneId].snapshot;
-  const activeRef = activePane.snapshot?.cellRef || "等待新选区";
-  const frozenInfo =
-    state.layout === "single"
-      ? "当前为单栏模式。"
-      : `${frozenPaneId === "paneA" ? "分栏 A" : "分栏 B"} 保持在 ${frozenSnapshot?.cellRef || "上一次内容"}`;
-
-  return `${title}当前跟随分栏：${state.activePaneId === "paneA" ? "分栏 A" : "分栏 B"}；最近同步：${activeRef}；${frozenInfo}${diagnosticMessage}`;
+  return "";
 }
 
 function buildCaptureDiagnosticMessage() {
@@ -777,7 +691,7 @@ function inferContentKind(rawContent, mode) {
       return {
         kind: "json",
         mediaItems,
-        warning: "当前内容不像合法 JSON，下面会按 JSON 模式尝试展示原文。"
+        warning: "JSON 格式可能不完整。"
       };
     }
 
@@ -812,7 +726,7 @@ function inferContentKind(rawContent, mode) {
     return {
       kind: "media",
       mediaItems,
-      warning: "检测到媒体链接，已优先按媒体模式展示；其余说明文本可切换到“纯文本”查看。"
+      warning: "已按媒体展示。"
     };
   }
 
@@ -820,7 +734,7 @@ function inferContentKind(rawContent, mode) {
     return {
       kind: "media",
       mediaItems,
-      warning: "识别到了链接，但暂时无法安全嵌入，已保留可点击链接。"
+      warning: "链接可直接打开。"
     };
   }
 
@@ -1295,7 +1209,7 @@ function renderMediaBlock(mediaItems, rawContent) {
   }
 
   if (strippedMediaText(rawContent).length > 0) {
-    wrapper.appendChild(createWarningCard("原始内容里还包含非链接文本，如需一起查看可切换到“纯文本”模式。"));
+    wrapper.appendChild(createWarningCard("存在附加文本。"));
   }
 
   if (!embeddableItems.length) {
@@ -1494,9 +1408,9 @@ function formatTime(timestamp) {
   });
 }
 
-function createEmptyState(title, detail) {
+function createEmptyState(title) {
   const wrapper = createElement("section", "empty-state");
-  wrapper.innerHTML = `<div><strong>${escapeHtml(title)}</strong><br>${escapeHtml(detail)}</div>`;
+  wrapper.innerHTML = `<div>${escapeHtml(title)}</div>`;
   return wrapper;
 }
 

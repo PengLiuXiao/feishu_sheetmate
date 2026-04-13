@@ -32,6 +32,29 @@ describe("sidepanel.js", () => {
     expect(inferContentKind("https://cdn.example.com/demo.png", "auto").kind).toBe("media");
   });
 
+  it("renders the minimal toolbar and keeps layout and mode controls", async () => {
+    const { window } = await loadSidepanel();
+
+    expect(window.document.querySelector(".toolbar__title")?.textContent).toBe("预览");
+    expect(Array.from(window.document.querySelectorAll(".layout-switch__button")).map((button) => button.textContent)).toEqual([
+      "单",
+      "左/右",
+      "上/下"
+    ]);
+    expect(window.document.getElementById("statusbar")).toBeNull();
+
+    const modeSelects = window.document.querySelectorAll(".mode-select");
+    expect(modeSelects).toHaveLength(2);
+    expect(Array.from(modeSelects[0].querySelectorAll("option")).map((option) => option.textContent)).toEqual([
+      "自动",
+      "文本",
+      "Markdown",
+      "JSON",
+      "LaTeX",
+      "媒体"
+    ]);
+  });
+
   it("recognizes media URLs including blocked platform videos and Feishu assets", async () => {
     const { exports } = await loadSidepanel();
     const { extractMediaItems, resolveMediaItem } = exports.sidepanel;
@@ -173,7 +196,7 @@ describe("sidepanel.js", () => {
     render();
 
     const paneContent = window.document.querySelector('[data-pane-id="paneA"] .pane__content');
-    expect(paneContent?.textContent).toContain("正在等待新表格的当前选区");
+    expect(paneContent?.textContent).toContain("等待当前选区");
     expect(paneContent?.textContent).not.toContain("Old sheet value");
   });
 
@@ -221,7 +244,7 @@ describe("sidepanel.js", () => {
     render();
 
     const paneContent = window.document.querySelector('[data-pane-id="paneA"] .pane__content');
-    expect(paneContent?.textContent).toContain("正在等待新表格的当前选区");
+    expect(paneContent?.textContent).toContain("等待当前选区");
     expect(paneContent?.textContent).not.toContain("Old shell value");
   });
 
@@ -308,5 +331,84 @@ describe("sidepanel.js", () => {
     render();
 
     expect(chrome.runtime.sendMessage).not.toHaveBeenCalled();
+  });
+
+  it("compresses meta and empty-state copy in the minimal UI", async () => {
+    const { window, exports } = await loadSidepanel();
+    const { setTestRuntimeState, render } = exports.sidepanel;
+
+    setTestRuntimeState({
+      currentTab: {
+        id: 31,
+        url: "https://example.feishu.cn/sheets/31",
+        title: "Sheet 31"
+      },
+      captureStatus: {
+        ready: true,
+        pageKind: "sheet-ready",
+        pageSupported: true,
+        url: "https://example.feishu.cn/sheets/31",
+        pageSessionKey: "session-3"
+      },
+      state: {
+        layout: "single",
+        activePaneId: "paneA",
+        panes: {
+          paneA: {
+            mode: "auto",
+            snapshot: {
+              cellRef: "B2",
+              rawContent: "hello",
+              source: "formula-bar",
+              url: "https://example.feishu.cn/sheets/31",
+              pageTitle: "Sheet 31",
+              pageSessionKey: "session-3",
+              tabId: 31
+            }
+          },
+          paneB: {
+            mode: "auto",
+            snapshot: null
+          }
+        }
+      }
+    });
+
+    render();
+
+    const meta = window.document.querySelector('[data-pane-id="paneA"] .pane__meta');
+    expect(meta?.textContent).toBe("B2 · 纯文本");
+
+    setTestRuntimeState({
+      currentTab: {
+        id: 31,
+        url: "https://example.feishu.cn/sheets/31",
+        title: "Sheet 31"
+      },
+      captureStatus: {
+        ready: false
+      },
+      state: {
+        layout: "single",
+        activePaneId: "paneA",
+        panes: {
+          paneA: {
+            mode: "auto",
+            snapshot: null
+          },
+          paneB: {
+            mode: "auto",
+            snapshot: null
+          }
+        }
+      }
+    });
+
+    render();
+
+    const paneContent = window.document.querySelector('[data-pane-id="paneA"] .pane__content');
+    expect(paneContent?.textContent).toContain("未连接");
+    expect(paneContent?.textContent).not.toContain("如果");
+    expect(paneContent?.textContent).not.toContain("通常");
   });
 });
