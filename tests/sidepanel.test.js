@@ -55,6 +55,29 @@ describe("sidepanel.js", () => {
     ]);
   });
 
+  it("keeps columns and rows as distinct layouts in the side panel", async () => {
+    const { window, exports } = await loadSidepanel();
+    const board = window.document.getElementById("board");
+    const { setTestRuntimeState, render } = exports.sidepanel;
+    const stylesheet = readRepoFile("sidepanel.css");
+
+    expect(stylesheet).toContain('.board[data-layout="columns"] {\n  grid-template-columns: repeat(2, minmax(0, 1fr));');
+    expect(stylesheet).toContain('@media (max-width: 900px) {\n  .board[data-layout="columns"] {\n    grid-template-columns: repeat(2, minmax(0, 1fr));');
+    expect(stylesheet).toContain('.board[data-layout="rows"] {\n  grid-template-columns: 1fr;\n  grid-template-rows: repeat(2, minmax(220px, 1fr));');
+
+    setTestRuntimeState({ state: { layout: "columns" } });
+    render();
+    expect(board?.dataset.layout).toBe("columns");
+
+    setTestRuntimeState({ state: { layout: "rows" } });
+    render();
+    expect(board?.dataset.layout).toBe("rows");
+
+    setTestRuntimeState({ state: { layout: "single" } });
+    render();
+    expect(board?.dataset.layout).toBe("single");
+  });
+
   it("recognizes media URLs including blocked platform videos and Feishu assets", async () => {
     const { exports } = await loadSidepanel();
     const { extractMediaItems, resolveMediaItem } = exports.sidepanel;

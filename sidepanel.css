@@ -109,6 +109,7 @@ body {
 
 .board[data-layout="columns"] {
   grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: stretch;
 }
 
 .board[data-layout="rows"] {
@@ -451,10 +452,34 @@ body {
 
 @media (max-width: 900px) {
   .board[data-layout="columns"] {
-    grid-template-columns: 1fr;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .pane {
     grid-template-rows: auto auto minmax(180px, 1fr);
+  }
+
+  .pane__header {
+    padding: 10px 12px 6px;
+  }
+
+  .pane__controls {
+    padding: 0 12px 8px;
+  }
+
+  .pane__content {
+    padding: 10px 12px 12px;
+  }
+
+  .preview-card,
+  .markdown-media,
+  .media-card,
+  .latex-panel,
+  .media-grid {
+    gap: 8px;
+  }
+
+  .tag {
+    padding: 3px 7px;
   }
 }
