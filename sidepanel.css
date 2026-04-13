@@ -9,6 +9,7 @@
   --text-muted: #707783;
   --accent: #111418;
   --accent-soft: #f1f3f6;
+  --focus-ring: #111418;
   --warn-bg: #fff7ed;
   --warn-text: #9a3412;
   --radius-xl: 18px;
@@ -133,7 +134,8 @@ body {
 }
 
 .pane.is-active {
-  border-color: var(--line-strong);
+  border-color: var(--focus-ring);
+  box-shadow: 0 0 0 1.5px var(--focus-ring), var(--shadow);
 }
 
 .pane.is-disabled {

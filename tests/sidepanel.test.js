@@ -78,6 +78,77 @@ describe("sidepanel.js", () => {
     expect(board?.dataset.layout).toBe("single");
   });
 
+  it("highlights only the active pane with a follow ring", async () => {
+    const { window, exports } = await loadSidepanel();
+    const { setTestRuntimeState, render } = exports.sidepanel;
+
+    setTestRuntimeState({
+      currentTab: {
+        id: 12,
+        url: "https://example.feishu.cn/sheets/12",
+        title: "Sheet 12"
+      },
+      captureStatus: {
+        ready: true,
+        pageKind: "sheet-ready",
+        pageSupported: true,
+        url: "https://example.feishu.cn/sheets/12",
+        pageSessionKey: "session-12"
+      },
+      state: {
+        layout: "columns",
+        activePaneId: "paneA",
+        panes: {
+          paneA: {
+            mode: "auto",
+            snapshot: null
+          },
+          paneB: {
+            mode: "auto",
+            snapshot: null
+          }
+        }
+      }
+    });
+
+    render();
+
+    const paneA = window.document.querySelector('[data-pane-id="paneA"]');
+    const paneB = window.document.querySelector('[data-pane-id="paneB"]');
+    expect(paneA?.classList.contains("is-active")).toBe(true);
+    expect(paneB?.classList.contains("is-active")).toBe(false);
+
+    setTestRuntimeState({
+      state: {
+        layout: "columns",
+        activePaneId: "paneB",
+        panes: {
+          paneA: {
+            mode: "auto",
+            snapshot: null
+          },
+          paneB: {
+            mode: "auto",
+            snapshot: null
+          }
+        }
+      }
+    });
+
+    render();
+
+    expect(paneA?.classList.contains("is-active")).toBe(false);
+    expect(paneB?.classList.contains("is-active")).toBe(true);
+  });
+
+  it("uses a visible ring style for the active pane", async () => {
+    const stylesheet = readRepoFile("sidepanel.css");
+
+    expect(stylesheet).toContain("--focus-ring: #111418;");
+    expect(stylesheet).toContain(".pane.is-active {\n  border-color: var(--focus-ring);");
+    expect(stylesheet).toContain("box-shadow: 0 0 0 1.5px var(--focus-ring), var(--shadow);");
+  });
+
   it("recognizes media URLs including blocked platform videos and Feishu assets", async () => {
     const { exports } = await loadSidepanel();
     const { extractMediaItems, resolveMediaItem } = exports.sidepanel;
