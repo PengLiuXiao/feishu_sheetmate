@@ -1,0 +1,56 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Extract version from tag
+        id: version
+        run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+
+      - name: Verify version matches manifest.json
+        run: |
+          MANIFEST_VERSION=$(node -e "console.log(require('./manifest.json').version)")
+          if [ "$MANIFEST_VERSION" != "${{ steps.version.outputs.VERSION }}" ]; then
+            echo "Error: Tag version (${{ steps.version.outputs.VERSION }}) doesn't match manifest.json version ($MANIFEST_VERSION)"
+            exit 1
+          fi
+
+      - name: Package extension
+        run: bash scripts/package-extension.sh
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: release/feishu-sheetmate-v${{ steps.version.outputs.VERSION }}.zip
+          body: |
+            ## Feishu SheetMate v${{ steps.version.outputs.VERSION }}
+
+            Chrome 扩展包已自动构建，下载 zip 文件后解压并加载到 Chrome。
+
+            ### 安装方式
+            1. 下载下方的 `feishu-sheetmate-v${{ steps.version.outputs.VERSION }}.zip`
+            2. 解压到本地目录
+            3. 打开 Chrome 的 `chrome://extensions/`
+            4. 启用"开发者模式"
+            5. 点击"加载已解压的扩展程序"，选择解压后的目录
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

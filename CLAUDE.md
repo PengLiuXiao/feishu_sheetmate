@@ -110,6 +110,8 @@ npm run test:run      # 单次运行所有测试
 - `tests/sidepanel/sidepanel.test.js` - 侧边栏渲染与交互逻辑
 
 ### 打包发布
+
+**本地打包**：
 ```bash
 npm run package       # 或直接运行 ./scripts/package-extension.sh
 ```
@@ -121,6 +123,21 @@ npm run package       # 或直接运行 ./scripts/package-extension.sh
 4. 生成 `feishu-sheetmate-v{version}.zip` 压缩包
 
 发布产物仅包含运行时必需文件，不包含 `tests/`、`scripts/`、`node_modules/`、`.github/` 等开发文件。
+
+**自动发布到 GitHub Releases**：
+1. 更新 `manifest.json` 中的版本号（如 `0.2.0`）
+2. 提交更改并推送到 main 分支
+3. 创建并推送对应的 Git tag：
+   ```bash
+   git tag v0.2.0
+   git push origin v0.2.0
+   ```
+4. GitHub Actions 自动触发 `.github/workflows/release.yml`：
+   - 验证 tag 版本与 manifest.json 版本一致
+   - 执行打包脚本生成 zip
+   - 创建 GitHub Release 并上传 zip 附件
+
+注意：tag 格式必须为 `v{version}`（如 `v0.2.0`），且必须与 `manifest.json` 中的版本号匹配，否则构建失败。
 
 ### 本地安装与调试
 1. 打开 `chrome://extensions/`，启用"开发者模式"
