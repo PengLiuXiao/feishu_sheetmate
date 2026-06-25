@@ -304,23 +304,10 @@ function exposeBackgroundTestExports() {
 
   const root = globalThis.__sheetMateTestExports || (globalThis.__sheetMateTestExports = {});
   root.background = {
-    buildSnapshotPayload,
     getCaptureStatusKey,
-    getMessageTabId,
-    getPanelStateKey,
     getSnapshotKey,
-    handleCaptureStatus,
-    handleCellSnapshot,
-    handleContentScriptReady,
-    handleEnsureContentScript,
-    injectContentScript,
-    injectOpenFeishuTabs,
     initializeBackgroundRuntime,
-    isFeishuWorkspaceUrl,
-    isInjectableFeishuTab,
-    mergeCaptureStatus,
-    normalizeText,
-    updateCaptureStatus
+    mergeCaptureStatus
   };
 }
 

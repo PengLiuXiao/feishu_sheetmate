@@ -8,9 +8,6 @@ const VIDEO_EXTENSIONS = new Set(["mp4", "webm", "ogg", "mov", "m4v", "m3u8", "a
 const FEISHU_MEDIA_HOST_PATTERN = /(?:^|\.)((feishu\.cn)|(larksuite\.com)|(larkoffice\.com))$/i;
 const FEISHU_IMAGE_HINT_PATTERN = /\b(image|img|photo|picture|thumbnail|thumb|cover|avatar|snapshot)\b/i;
 const FEISHU_VIDEO_HINT_PATTERN = /\b(video|stream|vod|media|playback)\b/i;
-const YOUTUBE_HOST_PATTERN = /(?:^|\.)youtube\.com$/i;
-const YOUTUBE_SHORT_HOST_PATTERN = /(?:^|\.)youtu\.be$/i;
-const BILIBILI_HOST_PATTERN = /(?:^|\.)bilibili\.com$/i;
 const STALE_SCRIPT_HINT_DELAY_MS = 12000;
 const CONTENT_SCRIPT_REQUEST_COOLDOWN_MS = 1500;
 const SHEET_MATE_TEST_MODE = globalThis.__SHEET_MATE_TEST__ === true;
@@ -645,30 +642,6 @@ function renderPreview(snapshot, mode) {
   return card;
 }
 
-function buildStatusMessage() {
-  return "";
-}
-
-function buildCaptureDiagnosticMessage() {
-  if (!captureStatus) {
-    return "";
-  }
-
-  if (captureStatus.lastError) {
-    return `；最近错误：${captureStatus.lastError}`;
-  }
-
-  if (captureStatus.lastSupportReason) {
-    return `；页面识别：${captureStatus.lastSupportReason}`;
-  }
-
-  if (captureStatus.lastExtractorMessage) {
-    return `；最近诊断：${captureStatus.lastExtractorMessage}`;
-  }
-
-  return "";
-}
-
 function hasCaptureAttempted(status) {
   return Boolean(status?.lastExtractorStage && status.lastExtractorStage !== "script-ready");
 }
@@ -859,11 +832,6 @@ function resolveMediaItem(url) {
       return { url, type: feishuType };
     }
 
-    const platformVideo = inferPlatformVideo(parsed);
-    if (platformVideo) {
-      return platformVideo;
-    }
-
     return fallback;
   } catch {
     return fallback;
@@ -946,122 +914,12 @@ function inferFeishuMediaType(parsed) {
   return "unknown";
 }
 
-function inferPlatformVideo(parsed) {
-  return inferYouTubeVideo(parsed) || inferBilibiliVideo(parsed);
-}
-
-function inferYouTubeVideo(parsed) {
-  const hostname = parsed.hostname.toLowerCase();
-  let videoId = "";
-
-  if (YOUTUBE_SHORT_HOST_PATTERN.test(hostname)) {
-    videoId = parsed.pathname.split("/").filter(Boolean)[0] || "";
-  } else if (YOUTUBE_HOST_PATTERN.test(hostname)) {
-    const pathSegments = parsed.pathname.split("/").filter(Boolean);
-
-    if (parsed.pathname === "/watch") {
-      videoId = parsed.searchParams.get("v") || "";
-    } else if (pathSegments[0] === "shorts" || pathSegments[0] === "embed") {
-      videoId = pathSegments[1] || "";
-    }
-  }
-
-  if (!isLikelyYouTubeVideoId(videoId)) {
-    return null;
-  }
-
-  return createBlockedPlatformVideoItem(parsed.href, "youtube", "unsupported_embed_policy");
-}
-
-function inferBilibiliVideo(parsed) {
-  if (!BILIBILI_HOST_PATTERN.test(parsed.hostname)) {
-    return null;
-  }
-
-  const pathSegments = parsed.pathname.split("/").filter(Boolean);
-  if (pathSegments[0] !== "video") {
-    return null;
-  }
-
-  const identifier = pathSegments[1] || "";
-  const isBvid = /^BV[0-9A-Za-z]+$/.test(identifier);
-  const avMatch = identifier.match(/^av(\d+)$/i);
-
-  if (!isBvid && !avMatch) {
-    return null;
-  }
-
-  return createBlockedPlatformVideoItem(parsed.href, "bilibili", "platform_page_blocked");
-}
-
-function isLikelyYouTubeVideoId(value) {
-  return /^[A-Za-z0-9_-]{6,}$/.test(String(value || ""));
-}
-
 function isEmbeddableMediaItem(item) {
   return Boolean(item) && (item.type === "image" || item.type === "video");
 }
 
-function createBlockedPlatformVideoItem(openUrl, provider, reasonCode) {
-  return {
-    url: openUrl,
-    type: "platform_video_blocked",
-    provider,
-    reasonCode,
-    reasonText: platformBlockedReason(provider, reasonCode),
-    openUrl
-  };
-}
-
-function platformBlockedReason(provider, reasonCode) {
-  const providerLabel = platformLabel(provider);
-
-  switch (reasonCode) {
-    case "unsupported_embed_policy":
-      return `${providerLabel} 对嵌入来源或播放器环境有限制，当前侧边栏不直接播放该平台视频。`;
-    case "platform_page_blocked":
-    default:
-      return `${providerLabel} 视频页为了稳定性和一致性不在侧边栏内播放，请打开原页面查看。`;
-  }
-}
-
-function platformLabel(provider) {
-  switch (provider) {
-    case "youtube":
-      return "YouTube";
-    case "bilibili":
-      return "Bilibili";
-    default:
-      return "当前平台";
-  }
-}
-
-function isBlockedPlatformVideo(item) {
-  return Boolean(item) && item.type === "platform_video_blocked";
-}
-
 function isUnknownMediaItem(item) {
   return Boolean(item) && item.type === "unknown";
-}
-
-function renderBlockedPlatformCard(item) {
-  const card = createElement("article", "media-card");
-  const note = createWarningCard(item.reasonText);
-  card.appendChild(note);
-
-  const summary = createElement("p", "media-card__summary");
-  summary.textContent = `${platformLabel(item.provider)} 链接已识别，但按当前策略不在侧边栏内播放。`;
-  card.appendChild(summary);
-
-  const openLink = createExternalLink("打开原页面", item.openUrl || item.url);
-  openLink.className = "media-card__action";
-  card.appendChild(openLink);
-
-  const sourceLink = createExternalLink(item.url, item.url);
-  sourceLink.className = "media-card__url";
-  card.appendChild(sourceLink);
-
-  return card;
 }
 
 function renderTextBlock(rawContent) {
@@ -1162,7 +1020,6 @@ function parseLatexPayload(rawContent) {
 function renderMediaBlock(mediaItems, rawContent) {
   const wrapper = createElement("section", "media-grid");
   const embeddableItems = mediaItems.filter((item) => isEmbeddableMediaItem(item));
-  const blockedPlatformItems = mediaItems.filter((item) => isBlockedPlatformVideo(item));
   const linkOnlyItems = mediaItems.filter((item) => isUnknownMediaItem(item));
 
   if (!mediaItems.length) {
@@ -1171,7 +1028,7 @@ function renderMediaBlock(mediaItems, rawContent) {
     return wrapper;
   }
 
-  if (!embeddableItems.length && !blockedPlatformItems.length) {
+  if (!embeddableItems.length) {
     wrapper.appendChild(createWarningCard("识别到了链接，但暂时无法安全嵌入，下面保留原始链接和原文。"));
   }
 
@@ -1198,10 +1055,6 @@ function renderMediaBlock(mediaItems, rawContent) {
     link.className = "media-card__url";
     card.appendChild(link);
     wrapper.appendChild(card);
-  }
-
-  for (const item of blockedPlatformItems) {
-    wrapper.appendChild(renderBlockedPlatformCard(item));
   }
 
   if (linkOnlyItems.length) {
@@ -1356,34 +1209,6 @@ function syntaxHighlightJson(json) {
   );
 }
 
-function translateSource(source) {
-  if (source.includes("+")) {
-    return source
-      .split("+")
-      .map((item) => translateSource(item))
-      .join(" + ");
-  }
-
-  switch (source) {
-    case "name-box":
-      return "名称框";
-    case "formula-bar":
-      return "公式栏";
-    case "editor":
-      return "编辑态";
-    case "exact-cell":
-      return "精确坐标单元格";
-    case "selected-cell":
-      return "选中单元格";
-    case "focused-cell":
-      return "聚焦单元格";
-    case "cell-ref":
-      return "坐标推断";
-    default:
-      return "页面推断";
-  }
-}
-
 function kindLabel(kind) {
   switch (kind) {
     case "markdown":
@@ -1398,14 +1223,6 @@ function kindLabel(kind) {
     default:
       return "纯文本";
   }
-}
-
-function formatTime(timestamp) {
-  return new Date(timestamp).toLocaleTimeString("zh-CN", {
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit"
-  });
 }
 
 function createEmptyState(title) {
@@ -1633,34 +1450,13 @@ function exposeSidepanelTestExports() {
 
   const root = globalThis.__sheetMateTestExports || (globalThis.__sheetMateTestExports = {});
   root.sidepanel = {
-    buildExplicitMediaWarning,
     extractMediaItems,
-    inferBilibiliVideo,
     inferContentKind,
-    inferFeishuMediaType,
-    inferMediaTypeFromName,
-    inferMediaTypeFromQuery,
-    inferYouTubeVideo,
-    getCurrentPageUrl,
-    getCurrentPageSessionKey,
-    isSnapshotStaleForPane,
-    looksLikeJson,
-    looksLikeLatex,
-    looksLikeMarkdown,
     mergeState,
-    normalizeCaptureStatus,
-    normalizeSnapshot,
-    parseLatexPayload,
-    renderJsonBlock,
-    renderLatexBlock,
-    renderMediaBlock,
     renderPreview,
-    requestContentScriptInjection,
+    render,
     resolveMediaItem,
-    sanitizeUrl,
-    setTestRuntimeState,
-    getTestRuntimeState,
-    render
+    setTestRuntimeState
   };
 }
 

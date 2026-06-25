@@ -54,40 +54,38 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ```text
 .
-├── manifest.json
-├── package.json
+├── manifest.json              # Chrome 扩展清单
+├── package.json               # npm 脚本与开发依赖
 ├── package-lock.json
-├── README.md
-├── CLAUDE.md
-├── AGENTS.md
-├── vitest.config.js
-├── .github/
-├── src/
-│   ├── background.js
-│   ├── content-script.js
-│   ├── sidepanel/
+├── README.md                  # 用户说明文档
+├── CLAUDE.md                  # 仓库协作与目录约定
+├── AGENTS.md                  # 与 CLAUDE.md 保持同步的代理说明
+├── vitest.config.js           # Vitest 配置
+├── .github/                   # CI 配置
+├── src/                       # 业务代码
+│   ├── background.js          # 后台 Service Worker 逻辑
+│   ├── content-script.js      # 飞书页面采集逻辑与选择器
+│   ├── sidepanel/             # 侧边栏 HTML、CSS、JS
 │   │   ├── sidepanel.html
 │   │   ├── sidepanel.js
 │   │   └── sidepanel.css
-│   └── shared/
-├── tests/
-│   ├── helpers/
+│   └── shared/                # 预留共享常量、存储 key、通用工具（当前为空）
+├── scripts/                   # 自动化脚本（打包、部署等）
+│   └── package-extension.sh   # 打包脚本
+├── release/                   # 发布产物目录（git ignored）
+│   ├── feishu-sheetmate-v{version}/
+│   └── feishu-sheetmate-v{version}.zip
+├── tests/                     # 按模块镜像组织的测试
+│   ├── helpers/               # 测试辅助工具
 │   ├── background/
+│   │   └── background.test.js
 │   ├── content/
+│   │   └── content-script.test.js
 │   └── sidepanel/
-└── vendor/
+│       └── sidepanel.test.js
+└── vendor/                    # 第三方静态资源
     └── katex/
 ```
-
-后续修改时请优先按以下位置查找和落文件：
-
-- 根目录：只保留扩展清单、工程配置、说明文档
-- `src/background.js`：后台 Service Worker 逻辑
-- `src/content-script.js`：飞书页面采集逻辑与选择器
-- `src/sidepanel/`：侧边栏 HTML、CSS、JS
-- `src/shared/`：预留共享常量、存储 key、通用工具
-- `tests/background/`、`tests/content/`、`tests/sidepanel/`：按模块镜像组织的测试
-- `vendor/`：第三方静态资源，保持无构建步骤
 
 ## 开发命令
 
@@ -95,7 +93,6 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ```bash
 npm test              # 交互式测试模式（watch mode）
 npm run test:run      # 单次运行所有测试
-npm run test:coverage # 生成覆盖率报告
 ```
 
 测试框架：Vitest + jsdom，配置文件 `vitest.config.js`。
@@ -103,6 +100,19 @@ npm run test:coverage # 生成覆盖率报告
 - `tests/background/background.test.js`
 - `tests/content/content-script.test.js`
 - `tests/sidepanel/sidepanel.test.js`
+
+### 打包发布
+```bash
+./scripts/package-extension.sh
+```
+
+该脚本会：
+1. 从 `manifest.json` 读取版本号
+2. 在 `release/` 目录创建 `feishu-sheetmate-v{version}/` 文件夹
+3. 复制 `manifest.json`、`src/`、`vendor/` 到打包目录
+4. 生成 `feishu-sheetmate-v{version}.zip` 压缩包
+
+发布产物仅包含运行时必需文件，不包含测试、脚本、配置等开发文件。
 
 ### 本地安装与调试
 1. 打开 `chrome://extensions/`，启用"开发者模式"
@@ -166,7 +176,7 @@ npm run test:coverage # 生成覆盖率报告
 - **无构建步骤**：为了降低维护成本，放弃了 TypeScript、打包工具、CSS 预处理器
 - **内容提取依赖 DOM 选择器**：飞书页面结构变化可能需要更新选择器
 - **会话存储**：浏览器重启后不保留冻结内容，仅保存在当前会话中
-- **视频平台限制**：YouTube/Bilibili 等平台视频页面不在侧边栏内嵌播放（跨域限制），仅显示说明和原页面链接
+- **平台视频页面**：YouTube/Bilibili 等页面类视频链接按普通外链处理，不做特殊识别或内嵌
 - **图片/视频支持范围**：优先支持直链和飞书/Lark 媒体链接，带 `filename`/`name` 参数的链接需能推断扩展名
 
 ## 代码风格约定

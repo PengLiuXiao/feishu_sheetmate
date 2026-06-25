@@ -149,18 +149,16 @@ describe("sidepanel.js", () => {
     expect(stylesheet).toContain("box-shadow: 0 0 0 1.5px var(--focus-ring), var(--shadow);");
   });
 
-  it("recognizes media URLs including blocked platform videos and Feishu assets", async () => {
+  it("recognizes media URLs including Feishu assets and link fallbacks", async () => {
     const { exports } = await loadSidepanel();
     const { extractMediaItems, resolveMediaItem } = exports.sidepanel;
 
     expect(resolveMediaItem("https://www.youtube.com/watch?v=dQw4w9WgXcQ")).toMatchObject({
-      type: "platform_video_blocked",
-      provider: "youtube"
+      type: "unknown"
     });
 
     expect(resolveMediaItem("https://www.bilibili.com/video/BV1xx411c7mD")).toMatchObject({
-      type: "platform_video_blocked",
-      provider: "bilibili"
+      type: "unknown"
     });
 
     expect(
@@ -227,7 +225,7 @@ describe("sidepanel.js", () => {
     });
   });
 
-  it("renders blocked platform videos with warning copy and external link", async () => {
+  it("renders platform video pages as external links", async () => {
     const { exports } = await loadSidepanel();
     const { renderPreview } = exports.sidepanel;
 
@@ -240,8 +238,7 @@ describe("sidepanel.js", () => {
       "auto"
     );
 
-    expect(node.querySelector(".warning-card")?.textContent).toContain("不直接播放");
-    expect(node.textContent).toContain("YouTube");
+    expect(node.querySelector(".warning-card")?.textContent).toContain("链接可直接打开");
     expect(node.querySelector('a[href="https://www.youtube.com/watch?v=dQw4w9WgXcQ"]')).not.toBeNull();
     expect(node.textContent).toContain("Demo Sheet");
   });
