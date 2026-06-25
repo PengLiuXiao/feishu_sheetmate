@@ -29,12 +29,14 @@
   - LaTeX
   - 媒体链接
 
-## 文件说明
+## 目录说明
 
 - `manifest.json`：插件声明
-- `background.js`：侧边栏行为与按标签页存储的最新单元格快照
-- `content-script.js`：从飞书表格页面提取当前选中的单元格内容
-- `sidepanel.html` / `sidepanel.css` / `sidepanel.js`：侧边栏界面和渲染逻辑
+- `src/background.js`：侧边栏行为与按标签页存储的最新单元格快照
+- `src/content-script.js`：从飞书表格页面提取当前选中的单元格内容
+- `src/sidepanel/sidepanel.html` / `src/sidepanel/sidepanel.css` / `src/sidepanel/sidepanel.js`：侧边栏界面和渲染逻辑
+- `src/shared/`：预留给后续共享常量、存储 key 和通用工具
+- `tests/background/` / `tests/content/` / `tests/sidepanel/`：按模块镜像组织的测试
 - `vendor/katex/`：本地 KaTeX 静态资源，用于离线公式渲染
 
 ## 本地安装
@@ -62,7 +64,7 @@
 
 ## 提取策略说明
 
-由于飞书表格是动态页面，`content-script.js` 当前采用的是“多策略提取”：
+由于飞书表格是动态页面，`src/content-script.js` 当前采用的是“多策略提取”：
 
 - 优先读公式栏/输入框/编辑态文本
 - 其次读当前高亮或选中的单元格文本
@@ -74,7 +76,7 @@
 - `NAME_BOX_SELECTORS`
 - `SELECTED_CELL_SELECTORS`
 
-它们都位于 [content-script.js](/Users/vincentliu/Coding/Byte_Work/feishu_sheetmate/content-script.js)。
+它们都位于 [content-script.js](file:///Users/vincentliu/Coding/Byte_Work/feishu_sheetmate/src/content-script.js)。
 
 ## 已知限制
 

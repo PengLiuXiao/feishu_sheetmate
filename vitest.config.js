@@ -9,7 +9,7 @@ export default defineConfig({
     coverage: {
       provider: "v8",
       reporter: ["text", "html"],
-      include: ["background.js", "content-script.js", "sidepanel.js"]
+      include: ["src/background.js", "src/content-script.js", "src/sidepanel/sidepanel.js"]
     }
   }
 });

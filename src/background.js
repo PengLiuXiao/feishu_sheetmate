@@ -2,7 +2,7 @@ const SNAPSHOT_KEY_PREFIX = "sheetMateSnapshot:";
 const PANEL_STATE_KEY_PREFIX = "sheetMatePanelState:";
 const CAPTURE_STATUS_KEY_PREFIX = "sheetMateCaptureStatus:";
 const SHEET_MATE_TEST_MODE = globalThis.__SHEET_MATE_TEST__ === true;
-const CONTENT_SCRIPT_FILE = "content-script.js";
+const CONTENT_SCRIPT_FILE = "src/content-script.js";
 
 let backgroundInitialized = false;
 

@@ -71,7 +71,8 @@ export async function loadBrowserScript(relativePath, options = {}) {
   globalThis.chrome = window.chrome;
 
   vi.resetModules();
-  await import(new URL(`../../${relativePath}?t=${Date.now()}-${Math.random()}`, import.meta.url));
+  const modulePath = `/${relativePath.replace(/^\/+/, "")}?t=${Date.now()}-${Math.random()}`;
+  await import(/* @vite-ignore */ modulePath);
 
   return {
     dom,

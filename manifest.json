@@ -15,13 +15,13 @@
     "https://*.larkoffice.com/*"
   ],
   "background": {
-    "service_worker": "background.js"
+    "service_worker": "src/background.js"
   },
   "action": {
     "default_title": "打开飞书表格预览"
   },
   "side_panel": {
-    "default_path": "sidepanel.html"
+    "default_path": "src/sidepanel/sidepanel.html"
   },
   "content_scripts": [
     {
@@ -31,7 +31,7 @@
         "https://*.larkoffice.com/*"
       ],
       "js": [
-        "content-script.js"
+        "src/content-script.js"
       ],
       "run_at": "document_idle"
     }

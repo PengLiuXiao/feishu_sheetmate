@@ -1,9 +1,9 @@
-import { createChromeMock, loadBrowserScript } from "./helpers/script-loader.js";
+import { createChromeMock, loadBrowserScript } from "../helpers/script-loader.js";
 
 describe("background.js", () => {
   it("merges capture status with sensible fallbacks", async () => {
     const { chrome } = createChromeMock();
-    const { exports } = await loadBrowserScript("background.js", {
+    const { exports } = await loadBrowserScript("src/background.js", {
       setupWindow(window) {
         window.chrome = chrome;
       }
@@ -61,7 +61,7 @@ describe("background.js", () => {
 
   it("persists snapshot and capture status when receiving CELL_SNAPSHOT", async () => {
     const { chrome, listeners, storage } = createChromeMock();
-    const { exports } = await loadBrowserScript("background.js", {
+    const { exports } = await loadBrowserScript("src/background.js", {
       setupWindow(window) {
         window.chrome = chrome;
       }
@@ -129,7 +129,7 @@ describe("background.js", () => {
         { id: 3, url: "https://foo.larksuite.com/base/1" }
       ]
     });
-    const { exports } = await loadBrowserScript("background.js", {
+    const { exports } = await loadBrowserScript("src/background.js", {
       setupWindow(window) {
         window.chrome = chrome;
       }
@@ -142,17 +142,17 @@ describe("background.js", () => {
     expect(chrome.scripting.executeScript).toHaveBeenCalledTimes(2);
     expect(chrome.scripting.executeScript).toHaveBeenCalledWith({
       target: { tabId: 1 },
-      files: ["content-script.js"]
+      files: ["src/content-script.js"]
     });
     expect(chrome.scripting.executeScript).toHaveBeenCalledWith({
       target: { tabId: 3 },
-      files: ["content-script.js"]
+      files: ["src/content-script.js"]
     });
   });
 
   it("injects a content script into a requested tab when receiving ENSURE_CONTENT_SCRIPT", async () => {
     const { chrome, listeners } = createChromeMock();
-    const { exports } = await loadBrowserScript("background.js", {
+    const { exports } = await loadBrowserScript("src/background.js", {
       setupWindow(window) {
         window.chrome = chrome;
       }
@@ -181,7 +181,7 @@ describe("background.js", () => {
     expect(handled).toBe(true);
     expect(chrome.scripting.executeScript).toHaveBeenCalledWith({
       target: { tabId: 55 },
-      files: ["content-script.js"]
+      files: ["src/content-script.js"]
     });
     expect(sendResponse).toHaveBeenCalledWith({ ok: true });
   });

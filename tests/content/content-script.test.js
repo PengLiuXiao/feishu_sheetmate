@@ -1,10 +1,10 @@
-import { createChromeMock, loadBrowserScript, setVisibleRect } from "./helpers/script-loader.js";
+import { createChromeMock, loadBrowserScript, setVisibleRect } from "../helpers/script-loader.js";
 
 describe("content-script.js", () => {
   function loadContentScript({ html, url = "https://tenant.feishu.cn/sheets/mock" } = {}) {
     const { chrome } = createChromeMock();
 
-    return loadBrowserScript("content-script.js", {
+    return loadBrowserScript("src/content-script.js", {
       html: html || "<!doctype html><html><body></body></html>",
       url,
       setupWindow(window) {

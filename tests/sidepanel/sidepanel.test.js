@@ -1,4 +1,4 @@
-import { loadBrowserScript, readRepoFile } from "./helpers/script-loader.js";
+import { loadBrowserScript, readRepoFile } from "../helpers/script-loader.js";
 
 describe("sidepanel.js", () => {
   function loadSidepanel() {
@@ -9,9 +9,9 @@ describe("sidepanel.js", () => {
       windows: { WINDOW_ID_NONE: -1, onFocusChanged: { addListener() {} } }
     };
 
-    return loadBrowserScript("sidepanel.js", {
-      html: readRepoFile("sidepanel.html"),
-      url: "https://example.feishu.cn/sidepanel.html",
+    return loadBrowserScript("src/sidepanel/sidepanel.js", {
+      html: readRepoFile("src/sidepanel/sidepanel.html"),
+      url: "https://example.feishu.cn/src/sidepanel/sidepanel.html",
       setupWindow(window) {
         window.chrome = chrome;
       }
@@ -59,7 +59,7 @@ describe("sidepanel.js", () => {
     const { window, exports } = await loadSidepanel();
     const board = window.document.getElementById("board");
     const { setTestRuntimeState, render } = exports.sidepanel;
-    const stylesheet = readRepoFile("sidepanel.css");
+    const stylesheet = readRepoFile("src/sidepanel/sidepanel.css");
 
     expect(stylesheet).toContain('.board[data-layout="columns"] {\n  grid-template-columns: repeat(2, minmax(0, 1fr));');
     expect(stylesheet).toContain('@media (max-width: 900px) {\n  .board[data-layout="columns"] {\n    grid-template-columns: repeat(2, minmax(0, 1fr));');
@@ -142,7 +142,7 @@ describe("sidepanel.js", () => {
   });
 
   it("uses a visible ring style for the active pane", async () => {
-    const stylesheet = readRepoFile("sidepanel.css");
+    const stylesheet = readRepoFile("src/sidepanel/sidepanel.css");
 
     expect(stylesheet).toContain("--focus-ring: #111418;");
     expect(stylesheet).toContain(".pane.is-active {\n  border-color: var(--focus-ring);");
