@@ -287,8 +287,31 @@ describe("sidepanel.js", () => {
     const iframe = node.querySelector("iframe");
     expect(iframe).not.toBeNull();
     expect(iframe?.src).toBe("https://www.youtube.com/embed/dQw4w9WgXcQ");
+    expect(node.textContent).toContain("可能限制侧边栏内嵌播放");
+    expect(node.querySelector(".media-card__action")?.textContent).toBe("打开原页面");
     expect(node.querySelector('a[href="https://www.youtube.com/watch?v=dQw4w9WgXcQ"]')).not.toBeNull();
     expect(node.querySelector(".preview-text")?.textContent || "").not.toContain("Demo Sheet");
+  });
+
+  it("renders an empty cell snapshot without stale media", async () => {
+    const { exports } = await loadSidepanel();
+    const { renderPreview } = exports.sidepanel;
+
+    const node = renderPreview(
+      {
+        cellRef: "E13",
+        rawContent: "",
+        source: "name-box+formula-bar+empty-cell",
+        pageTitle: "未命名表格"
+      },
+      "auto"
+    );
+
+    expect(node.textContent).toContain("E13");
+    expect(node.textContent).toContain("空单元格");
+    expect(node.querySelector("video")).toBeNull();
+    expect(node.querySelector("iframe")).toBeNull();
+    expect(node.querySelector(".media-card__url")).toBeNull();
   });
 
   it("auto-detects multiline Markdown headings from real Feishu cells", async () => {

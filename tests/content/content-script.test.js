@@ -248,11 +248,17 @@ describe("content-script.js", () => {
     });
 
     const result = runtime.readCellSnapshot();
-    expect(result.snapshot).toBeNull();
-    expect(result.status).toMatchObject({
-      stage: "miss:no-capture-source",
-      pageKind: "sheet-shell"
+    expect(result.snapshot).toMatchObject({
+      cellRef: "A1",
+      rawContent: "",
+      source: "name-box+formula-bar+empty-cell"
     });
+    expect(result.status).toMatchObject({
+      stage: "hit:name-box+formula-bar+empty-cell",
+      pageKind: "sheet-ready"
+    });
+    expect(result.snapshot.rawContent).not.toContain("飞书云文档");
+    expect(result.snapshot.rawContent).not.toContain("导入中");
   });
 
   it("ignores page noise when a real current cell signal exists", async () => {
@@ -273,6 +279,39 @@ describe("content-script.js", () => {
     });
     expect(result.snapshot.rawContent).not.toContain("飞书云文档");
     expect(result.snapshot.rawContent).not.toContain("加载中");
+  });
+
+  it("sends an empty snapshot after moving from media content to a blank cell", async () => {
+    const { window, exports, chrome } = await loadContentScript();
+    const nameBox = window.document.createElement("input");
+    nameBox.value = "J16";
+    setVisibleRect(nameBox, { top: 72, left: 16, width: 74, height: 28 });
+
+    const formula = window.document.createElement("div");
+    formula.className = "formulabar__inputarea simple-text-editor";
+    formula.textContent = "https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4";
+    setVisibleRect(formula, { top: 72, left: 112, width: 360, height: 48 });
+
+    window.document.body.append(nameBox, formula);
+
+    const runtime = exports.contentScript.createSheetMateContentScriptRuntime({ skipAutoStart: true });
+    runtime.captureAndSendSnapshot();
+
+    nameBox.value = "E13";
+    formula.textContent = "";
+    runtime.captureAndSendSnapshot();
+
+    const snapshotCalls = chrome.runtime.sendMessage.mock.calls.filter(([message]) => message.type === "CELL_SNAPSHOT");
+    expect(snapshotCalls).toHaveLength(2);
+    expect(snapshotCalls[0][0].payload).toMatchObject({
+      cellRef: "J16",
+      rawContent: "https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4"
+    });
+    expect(snapshotCalls[1][0].payload).toMatchObject({
+      cellRef: "E13",
+      rawContent: "",
+      source: "name-box+formula-bar+empty-cell"
+    });
   });
 
   it("re-sends ready and snapshot when pushState enters a new sheet with the same selected cell", async () => {

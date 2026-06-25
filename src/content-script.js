@@ -209,8 +209,11 @@ function createSheetMateContentScriptRuntime(options = {}) {
         selectedCellCandidate?.rawContent ||
         exactCellCandidate?.rawContent
     );
+    const hasStableEmptySelection = Boolean(
+      cellRef && !rawContent && (formulaBarCandidate || editorCandidate?.cellRef || gridCandidate?.cellRef)
+    );
 
-    if (!hasCurrentCellContent) {
+    if (!hasCurrentCellContent && !hasStableEmptySelection) {
       return {
         snapshot: null,
         status: {
@@ -237,6 +240,9 @@ function createSheetMateContentScriptRuntime(options = {}) {
       sourceParts.push(contentCandidate.source);
     } else if (cellRef) {
       sourceParts.push("cell-ref");
+    }
+    if (hasStableEmptySelection) {
+      sourceParts.push("empty-cell");
     }
 
     const source = uniqueMessages(sourceParts).join("+") || "unknown";
@@ -947,6 +953,10 @@ function createSheetMateContentScriptRuntime(options = {}) {
       return `已命中 ${label}，同步 ${cellRef} 的单元格内容。`;
     }
 
+    if (cellRef && sourceParts.includes("empty-cell")) {
+      return `已命中 ${cellRef} 空单元格。`;
+    }
+
     if (cellRef) {
       return `已命中 ${label}，同步 ${cellRef} 的坐标信息。`;
     }
@@ -970,6 +980,8 @@ function createSheetMateContentScriptRuntime(options = {}) {
         return "聚焦单元格";
       case "cell-ref":
         return "单元格坐标";
+      case "empty-cell":
+        return "空单元格";
       default:
         return source || "页面推断";
     }

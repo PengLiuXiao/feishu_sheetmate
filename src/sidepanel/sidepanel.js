@@ -634,6 +634,11 @@ function renderPreview(snapshot, mode) {
     card.appendChild(createWarningCard(kindInfo.warning));
   }
 
+  if (!String(snapshot.rawContent || "").trim()) {
+    card.appendChild(createEmptyState("空单元格"));
+    return card;
+  }
+
   switch (kindInfo.kind) {
     case "markdown":
       card.appendChild(renderMarkdownBlock(snapshot.rawContent));
@@ -1168,13 +1173,23 @@ function renderMediaBlock(mediaItems, rawContent) {
     }
 
     if (item.type === "embed") {
-      const iframe = createElement("iframe");
+      const embed = createElement("div", "media-card__embed");
+      const iframe = createElement("iframe", "media-card__iframe");
       iframe.src = item.embedUrl;
       iframe.title = `${item.provider || "视频"} 预览`;
       iframe.loading = "lazy";
       iframe.allow = "accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share";
       iframe.allowFullscreen = true;
-      card.appendChild(iframe);
+      embed.appendChild(iframe);
+      card.appendChild(embed);
+
+      const summary = createElement("p", "media-card__summary");
+      summary.textContent = `${item.provider || "平台"} 可能限制侧边栏内嵌播放；如果播放器报错，请打开原页面观看。`;
+      card.appendChild(summary);
+
+      const openLink = createExternalLink("打开原页面", item.url);
+      openLink.className = "media-card__action";
+      card.appendChild(openLink);
     }
 
     const link = createExternalLink(item.url, item.url);
