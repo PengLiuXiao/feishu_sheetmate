@@ -20,7 +20,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ### 1. Background Service Worker (`src/background.js`)
 - 管理侧边栏生命周期和行为
 - 存储每个标签页的单元格快照（`chrome.storage.session`）
-- 动态注入 content script 到飞书页面
+- 补充动态注入：扩展安装/更新后对已打开的飞书标签页注入 content script
 - 处理跨标签页的状态隔离逻辑
 - **关键数据结构**：
   - `sheetMateSnapshot:{tabId}` - 单元格内容快照
@@ -28,6 +28,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
   - `sheetMateCaptureStatus:{tabId}` - content script 连接状态
 
 ### 2. Content Script (`src/content-script.js`)
+- 通过 manifest.json 静态声明，在飞书页面加载时自动注入
 - 在飞书表格页面运行，提取当前选中单元格的内容
 - 多策略提取逻辑：优先级从高到低
   1. 公式栏/输入框/编辑态文本
@@ -60,8 +61,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ├── README.md                  # 用户说明文档
 ├── CLAUDE.md                  # 仓库协作与目录约定
 ├── AGENTS.md                  # 与 CLAUDE.md 保持同步的代理说明
-├── vitest.config.js           # Vitest 配置
+├── vitest.config.js           # Vitest 配置（environment: jsdom, globals: true）
 ├── .github/                   # CI 配置
+├── .gitignore                 # Git 忽略规则（包含 node_modules/, coverage/, release/）
 ├── src/                       # 业务代码
 │   ├── background.js          # 后台 Service Worker 逻辑
 │   ├── content-script.js      # 飞书页面采集逻辑与选择器
@@ -77,42 +79,48 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 │   └── feishu-sheetmate-v{version}.zip
 ├── tests/                     # 按模块镜像组织的测试
 │   ├── helpers/               # 测试辅助工具
+│   │   └── script-loader.js   # 测试环境中加载源文件的工具
 │   ├── background/
 │   │   └── background.test.js
 │   ├── content/
 │   │   └── content-script.test.js
 │   └── sidepanel/
 │       └── sidepanel.test.js
+├── coverage/                  # 测试覆盖率报告（git ignored，npm test 自动生成）
 └── vendor/                    # 第三方静态资源
-    └── katex/
+    └── katex/                 # KaTeX 离线渲染库（katex.min.js + katex.min.css）
 ```
 
 ## 开发命令
 
 ### 测试
 ```bash
-npm test              # 交互式测试模式（watch mode）
+npm test              # 交互式测试模式（watch mode），自动生成覆盖率报告到 coverage/
 npm run test:run      # 单次运行所有测试
 ```
 
-测试框架：Vitest + jsdom，配置文件 `vitest.config.js`。
+测试框架：Vitest + jsdom（配置：`vitest.config.js`）
+- 环境：jsdom 模拟浏览器 DOM
+- 全局 API：`describe`、`it`、`expect` 等自动注入
+- Mock 重置：每次测试后自动恢复 mock 状态（`restoreMocks: true`）
+
 测试文件位于 `tests/` 目录，对应三个核心文件：
-- `tests/background/background.test.js`
-- `tests/content/content-script.test.js`
-- `tests/sidepanel/sidepanel.test.js`
+- `tests/background/background.test.js` - Service Worker 逻辑与状态管理
+- `tests/content/content-script.test.js` - 飞书页面内容提取逻辑
+- `tests/sidepanel/sidepanel.test.js` - 侧边栏渲染与交互逻辑
 
 ### 打包发布
 ```bash
-./scripts/package-extension.sh
+npm run package       # 或直接运行 ./scripts/package-extension.sh
 ```
 
 该脚本会：
-1. 从 `manifest.json` 读取版本号
+1. 从 `manifest.json` 读取版本号（当前 0.1.0）
 2. 在 `release/` 目录创建 `feishu-sheetmate-v{version}/` 文件夹
 3. 复制 `manifest.json`、`src/`、`vendor/` 到打包目录
 4. 生成 `feishu-sheetmate-v{version}.zip` 压缩包
 
-发布产物仅包含运行时必需文件，不包含测试、脚本、配置等开发文件。
+发布产物仅包含运行时必需文件，不包含 `tests/`、`scripts/`、`node_modules/`、`.github/` 等开发文件。
 
 ### 本地安装与调试
 1. 打开 `chrome://extensions/`，启用"开发者模式"
