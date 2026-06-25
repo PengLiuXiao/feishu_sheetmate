@@ -1,0 +1,48 @@
+case_id,category,expected_auto_mode,expected_result,cell_content
+T001,plain,text,显示单行中文纯文本,你好
+T002,plain,text,显示中英文和符号,Hello SheetMate 123 !? 中文
+T003,plain_multiline,text,保留换行并只显示单元格内容,"第一行
+第二行
+第三行"
+T004,markdown_heading,markdown,渲染为 Markdown 标题,"# 你是谁
+
+## 你好搞笑啊"
+T005,markdown_list,markdown,渲染列表,"- 苹果
+- 香蕉
+- 梨"
+T006,markdown_code,markdown,渲染代码块,"```js
+const answer = 42;
+console.log(answer);
+```"
+T007,markdown_quote,markdown,渲染引用块,"> 这是一段引用
+> 第二行引用"
+T008,json,json,格式化 JSON,"{""name"":""SheetMate"",""count"":3,""ok"":true}"
+T009,json_multiline,json,格式化多行 JSON,"{
+  ""items"": [""a"", ""b""],
+  ""nested"": { ""ok"": true }
+}"
+T010,json_invalid,text,自动模式不误判为合法 JSON,"{""name"": ""missing end"""
+T011,latex_inline,latex,渲染行内公式,\frac{1}{2}
+T012,latex_block,latex,渲染块级公式,"$$
+E = mc^2
+$$"
+T013,latex_multiline,latex,渲染多行公式,"\begin{aligned}
+a &= b + c \\
+d &= e + f
+\end{aligned}"
+T014,image_direct,media,渲染图片,https://upload.wikimedia.org/wikipedia/commons/3/3f/Fronalpstock_big.jpg
+T015,video_direct,media,用 video controls 播放,https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4
+T016,video_webm,media,用 video controls 播放,https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.webm
+T017,youtube_watch,media_or_embed,按产品决策内嵌播放或明确降级,https://www.youtube.com/watch?v=jm2jBW462bU&t=23s
+T018,youtube_short,media_or_embed,按产品决策内嵌播放或明确降级,https://youtu.be/jm2jBW462bU
+T019,bilibili_page,media_or_link,按产品决策内嵌播放或明确降级,https://www.bilibili.com/video/BV1xx411c7mD
+T020,unknown_link,media,显示可点击外链并保留原文,https://example.com/page-without-media
+T021,mixed_text_video,media,同时显示文字和视频/链接,"这是一个视频：
+https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4
+结束。"
+T022,mixed_markdown_image,markdown,Markdown 图片语法渲染图片,"![preview](https://upload.wikimedia.org/wikipedia/commons/3/3f/Fronalpstock_big.jpg)
+
+说明文字"
+T023,long_text,text,长文本可滚动不撑破布局,这是一段很长很长的文本，用来测试侧边栏宽度、换行、滚动和边界表现。重复内容：这是一段很长很长的文本，用来测试侧边栏宽度、换行、滚动和边界表现。
+T024,empty,text,空单元格显示空状态,
+T025,spaces,text,空白内容显示为空白状态,"   "

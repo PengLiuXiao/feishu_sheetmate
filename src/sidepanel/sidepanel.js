@@ -8,6 +8,9 @@ const VIDEO_EXTENSIONS = new Set(["mp4", "webm", "ogg", "mov", "m4v", "m3u8", "a
 const FEISHU_MEDIA_HOST_PATTERN = /(?:^|\.)((feishu\.cn)|(larksuite\.com)|(larkoffice\.com))$/i;
 const FEISHU_IMAGE_HINT_PATTERN = /\b(image|img|photo|picture|thumbnail|thumb|cover|avatar|snapshot)\b/i;
 const FEISHU_VIDEO_HINT_PATTERN = /\b(video|stream|vod|media|playback)\b/i;
+const YOUTUBE_HOST_PATTERN = /(?:^|\.)youtube\.com$/i;
+const YOUTUBE_SHORT_HOST_PATTERN = /(?:^|\.)youtu\.be$/i;
+const BILIBILI_HOST_PATTERN = /(?:^|\.)bilibili\.com$/i;
 const STALE_SCRIPT_HINT_DELAY_MS = 12000;
 const CONTENT_SCRIPT_REQUEST_COOLDOWN_MS = 1500;
 const SHEET_MATE_TEST_MODE = globalThis.__SHEET_MATE_TEST__ === true;
@@ -603,6 +606,17 @@ function renderPaneContent(container, paneState) {
 }
 
 function renderPreview(snapshot, mode) {
+  snapshot = normalizeSnapshot(snapshot) || {
+    cellRef: null,
+    rawContent: "",
+    source: "unknown",
+    pageTitle: "",
+    url: "",
+    pageSessionKey: "",
+    capturedAt: null,
+    tabId: null
+  };
+
   const card = createElement("section", "preview-card");
   const kindInfo = inferContentKind(snapshot.rawContent, mode);
 
@@ -763,7 +777,7 @@ function looksLikeLatex(value) {
 
 function looksLikeMarkdown(value) {
   return (
-    /(^|\n)#{1,6}\s/.test(value) ||
+    /(^|\n)#{1,6}(?:\s|[^#])/.test(value) ||
     /(^|\n)\s*[-*+]\s+/.test(value) ||
     /(^|\n)\s*\d+\.\s+/.test(value) ||
     /(^|\n)>\s+/.test(value) ||
@@ -779,7 +793,9 @@ function strippedMediaText(value) {
   return value
     .replace(/!\[[^\]]*]\((https?:\/\/[^\s)]+)\)/g, "")
     .replace(/https?:\/\/[^\s)]+/g, "")
-    .replace(/\s+/g, "");
+    .replace(/[ \t]+\n/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
 }
 
 function extractMediaItems(rawContent) {
@@ -830,6 +846,11 @@ function resolveMediaItem(url) {
     const feishuType = inferFeishuMediaType(parsed);
     if (feishuType !== "unknown") {
       return { url, type: feishuType };
+    }
+
+    const embedItem = inferEmbedMediaItem(parsed);
+    if (embedItem) {
+      return embedItem;
     }
 
     return fallback;
@@ -914,8 +935,102 @@ function inferFeishuMediaType(parsed) {
   return "unknown";
 }
 
+function inferEmbedMediaItem(parsed) {
+  return inferYouTubeEmbedItem(parsed) || inferBilibiliEmbedItem(parsed);
+}
+
+function inferYouTubeEmbedItem(parsed) {
+  const hostname = parsed.hostname.toLowerCase();
+  let videoId = "";
+  let start = parseYouTubeStartSeconds(parsed);
+
+  if (YOUTUBE_SHORT_HOST_PATTERN.test(hostname)) {
+    videoId = parsed.pathname.split("/").filter(Boolean)[0] || "";
+  } else if (YOUTUBE_HOST_PATTERN.test(hostname)) {
+    const pathSegments = parsed.pathname.split("/").filter(Boolean);
+
+    if (parsed.pathname === "/watch") {
+      videoId = parsed.searchParams.get("v") || "";
+    } else if (pathSegments[0] === "shorts" || pathSegments[0] === "embed") {
+      videoId = pathSegments[1] || "";
+    }
+
+    if (pathSegments[0] === "embed" && !start) {
+      start = Number.parseInt(parsed.searchParams.get("start") || "", 10) || 0;
+    }
+  }
+
+  if (!isLikelyYouTubeVideoId(videoId)) {
+    return null;
+  }
+
+  const embedUrl = new URL(`https://www.youtube.com/embed/${videoId}`);
+  if (start > 0) {
+    embedUrl.searchParams.set("start", String(start));
+  }
+
+  return {
+    url: parsed.href,
+    type: "embed",
+    provider: "YouTube",
+    embedUrl: embedUrl.href
+  };
+}
+
+function inferBilibiliEmbedItem(parsed) {
+  if (!BILIBILI_HOST_PATTERN.test(parsed.hostname)) {
+    return null;
+  }
+
+  const pathSegments = parsed.pathname.split("/").filter(Boolean);
+  if (pathSegments[0] !== "video") {
+    return null;
+  }
+
+  const identifier = pathSegments[1] || "";
+  const embedUrl = new URL("https://player.bilibili.com/player.html");
+  if (/^BV[0-9A-Za-z]+$/.test(identifier)) {
+    embedUrl.searchParams.set("bvid", identifier);
+  } else {
+    const avMatch = identifier.match(/^av(\d+)$/i);
+    if (!avMatch) {
+      return null;
+    }
+    embedUrl.searchParams.set("aid", avMatch[1]);
+  }
+
+  return {
+    url: parsed.href,
+    type: "embed",
+    provider: "Bilibili",
+    embedUrl: embedUrl.href
+  };
+}
+
+function parseYouTubeStartSeconds(parsed) {
+  const rawValue = parsed.searchParams.get("t") || parsed.searchParams.get("start") || "";
+  const directSeconds = Number.parseInt(rawValue, 10);
+
+  if (Number.isFinite(directSeconds) && directSeconds > 0) {
+    return directSeconds;
+  }
+
+  const match = rawValue.match(/(?:(\d+)h)?(?:(\d+)m)?(?:(\d+)s)?$/);
+  if (!match || !match[0]) {
+    return 0;
+  }
+
+  return (Number.parseInt(match[1] || "0", 10) * 3600) +
+    (Number.parseInt(match[2] || "0", 10) * 60) +
+    Number.parseInt(match[3] || "0", 10);
+}
+
+function isLikelyYouTubeVideoId(value) {
+  return /^[A-Za-z0-9_-]{6,}$/.test(String(value || ""));
+}
+
 function isEmbeddableMediaItem(item) {
-  return Boolean(item) && (item.type === "image" || item.type === "video");
+  return Boolean(item) && (item.type === "image" || item.type === "video" || item.type === "embed");
 }
 
 function isUnknownMediaItem(item) {
@@ -1021,6 +1136,7 @@ function renderMediaBlock(mediaItems, rawContent) {
   const wrapper = createElement("section", "media-grid");
   const embeddableItems = mediaItems.filter((item) => isEmbeddableMediaItem(item));
   const linkOnlyItems = mediaItems.filter((item) => isUnknownMediaItem(item));
+  const surroundingText = strippedMediaText(rawContent);
 
   if (!mediaItems.length) {
     wrapper.appendChild(createWarningCard("没有识别出可直接嵌入的图片或视频链接，下面展示原始文本。"));
@@ -1051,6 +1167,16 @@ function renderMediaBlock(mediaItems, rawContent) {
       card.appendChild(video);
     }
 
+    if (item.type === "embed") {
+      const iframe = createElement("iframe");
+      iframe.src = item.embedUrl;
+      iframe.title = `${item.provider || "视频"} 预览`;
+      iframe.loading = "lazy";
+      iframe.allow = "accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share";
+      iframe.allowFullscreen = true;
+      card.appendChild(iframe);
+    }
+
     const link = createExternalLink(item.url, item.url);
     link.className = "media-card__url";
     card.appendChild(link);
@@ -1061,8 +1187,9 @@ function renderMediaBlock(mediaItems, rawContent) {
     wrapper.appendChild(createLinkList(linkOnlyItems.map((item) => item.url), embeddableItems.length ? "其他链接" : "识别到的链接"));
   }
 
-  if (strippedMediaText(rawContent).length > 0) {
+  if (surroundingText.length > 0) {
     wrapper.appendChild(createWarningCard("存在附加文本。"));
+    wrapper.appendChild(renderTextBlock(surroundingText));
   }
 
   if (!embeddableItems.length) {
@@ -1099,8 +1226,8 @@ function markdownToHtml(markdown) {
       continue;
     }
 
-    if (/^#{1,6}\s/.test(line)) {
-      const [, hashes, content] = line.match(/^(#{1,6})\s+(.*)$/) || [];
+    if (/^#{1,6}(?:\s|[^#])/.test(line)) {
+      const [, hashes, content] = line.match(/^(#{1,6})\s*(.*)$/) || [];
       const level = hashes.length;
       blocks.push(`<h${level}>${renderInlineMarkdown(content)}</h${level}>`);
       continue;
@@ -1144,7 +1271,7 @@ function markdownToHtml(markdown) {
       index + 1 < lines.length &&
       lines[index + 1].trim() &&
       !/^```/.test(lines[index + 1].trim()) &&
-      !/^#{1,6}\s/.test(lines[index + 1]) &&
+      !/^#{1,6}(?:\s|[^#])/.test(lines[index + 1]) &&
       !/^>\s?/.test(lines[index + 1]) &&
       !/^\s*[-*+]\s+/.test(lines[index + 1]) &&
       !/^\s*\d+\.\s+/.test(lines[index + 1])
@@ -1316,6 +1443,7 @@ function decodeMaybe(value) {
 
 function sanitizeInlineText(value) {
   return String(value || "")
+    .replace(/[\u200b-\u200f\u202a-\u202e\u2060-\u206f\ufeff]/g, "")
     .replace(/\s+/g, " ")
     .trim();
 }

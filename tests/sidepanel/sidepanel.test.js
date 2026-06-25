@@ -32,6 +32,17 @@ describe("sidepanel.js", () => {
     expect(inferContentKind("https://cdn.example.com/demo.png", "auto").kind).toBe("media");
   });
 
+  it("keeps the online rendering regression CSV dataset complete", () => {
+    const csv = readRepoFile("tests/fixtures/sheet-rendering-cases.csv");
+    const caseIds = Array.from(csv.matchAll(/^T\d{3},/gm)).map((match) => match[0].slice(0, -1));
+
+    expect(csv.startsWith("case_id,category,expected_auto_mode,expected_result,cell_content\n")).toBe(true);
+    expect(caseIds).toHaveLength(25);
+    expect(caseIds).toEqual(Array.from({ length: 25 }, (_, index) => `T${String(index + 1).padStart(3, "0")}`));
+    expect(csv).toContain("T017,youtube_watch");
+    expect(csv).toContain("T021,mixed_text_video");
+  });
+
   it("renders the minimal toolbar and keeps layout and mode controls", async () => {
     const { window } = await loadSidepanel();
 
@@ -153,12 +164,16 @@ describe("sidepanel.js", () => {
     const { exports } = await loadSidepanel();
     const { extractMediaItems, resolveMediaItem } = exports.sidepanel;
 
-    expect(resolveMediaItem("https://www.youtube.com/watch?v=dQw4w9WgXcQ")).toMatchObject({
-      type: "unknown"
+    expect(resolveMediaItem("https://www.youtube.com/watch?v=dQw4w9WgXcQ&t=23s")).toMatchObject({
+      type: "embed",
+      provider: "YouTube",
+      embedUrl: "https://www.youtube.com/embed/dQw4w9WgXcQ?start=23"
     });
 
     expect(resolveMediaItem("https://www.bilibili.com/video/BV1xx411c7mD")).toMatchObject({
-      type: "unknown"
+      type: "embed",
+      provider: "Bilibili",
+      embedUrl: "https://player.bilibili.com/player.html?bvid=BV1xx411c7mD"
     });
 
     expect(
@@ -175,6 +190,37 @@ describe("sidepanel.js", () => {
         expect.objectContaining({ type: "image" })
       ])
     );
+  });
+
+  it("recognizes all supported platform video URL variants as embed media", async () => {
+    const { exports } = await loadSidepanel();
+    const { resolveMediaItem } = exports.sidepanel;
+
+    expect(resolveMediaItem("https://www.youtube.com/watch?v=jm2jBW462bU&t=23s")).toMatchObject({
+      type: "embed",
+      provider: "YouTube",
+      embedUrl: "https://www.youtube.com/embed/jm2jBW462bU?start=23"
+    });
+    expect(resolveMediaItem("https://youtu.be/jm2jBW462bU")).toMatchObject({
+      type: "embed",
+      provider: "YouTube",
+      embedUrl: "https://www.youtube.com/embed/jm2jBW462bU"
+    });
+    expect(resolveMediaItem("https://www.youtube.com/shorts/jm2jBW462bU")).toMatchObject({
+      type: "embed",
+      provider: "YouTube",
+      embedUrl: "https://www.youtube.com/embed/jm2jBW462bU"
+    });
+    expect(resolveMediaItem("https://www.youtube.com/embed/jm2jBW462bU?start=12")).toMatchObject({
+      type: "embed",
+      provider: "YouTube",
+      embedUrl: "https://www.youtube.com/embed/jm2jBW462bU?start=12"
+    });
+    expect(resolveMediaItem("https://www.bilibili.com/video/av123456")).toMatchObject({
+      type: "embed",
+      provider: "Bilibili",
+      embedUrl: "https://player.bilibili.com/player.html?aid=123456"
+    });
   });
 
   it("falls back safely when merging invalid panel state", async () => {
@@ -225,7 +271,7 @@ describe("sidepanel.js", () => {
     });
   });
 
-  it("renders platform video pages as external links", async () => {
+  it("renders platform video pages inside the panel instead of treating them as plain external links", async () => {
     const { exports } = await loadSidepanel();
     const { renderPreview } = exports.sidepanel;
 
@@ -238,9 +284,128 @@ describe("sidepanel.js", () => {
       "auto"
     );
 
-    expect(node.querySelector(".warning-card")?.textContent).toContain("链接可直接打开");
+    const iframe = node.querySelector("iframe");
+    expect(iframe).not.toBeNull();
+    expect(iframe?.src).toBe("https://www.youtube.com/embed/dQw4w9WgXcQ");
     expect(node.querySelector('a[href="https://www.youtube.com/watch?v=dQw4w9WgXcQ"]')).not.toBeNull();
-    expect(node.textContent).toContain("Demo Sheet");
+    expect(node.querySelector(".preview-text")?.textContent || "").not.toContain("Demo Sheet");
+  });
+
+  it("auto-detects multiline Markdown headings from real Feishu cells", async () => {
+    const { exports } = await loadSidepanel();
+    const { inferContentKind, renderPreview } = exports.sidepanel;
+    const rawContent = "#你是谁\n\n##你好搞笑啊";
+
+    expect(inferContentKind(rawContent, "auto").kind).toBe("markdown");
+
+    const node = renderPreview(
+      {
+        cellRef: "A7",
+        rawContent,
+        pageTitle: "未命名表格"
+      },
+      "auto"
+    );
+
+    expect(node.querySelector(".markdown-body h1")?.textContent).toBe("你是谁");
+    expect(node.querySelector(".markdown-body h2")?.textContent).toBe("你好搞笑啊");
+    expect(node.querySelector(".preview-text")).toBeNull();
+  });
+
+  it("keeps multiline plain text line breaks in text mode", async () => {
+    const { exports } = await loadSidepanel();
+    const { renderPreview } = exports.sidepanel;
+    const rawContent = "第一行\n第二行\n第三行";
+
+    const node = renderPreview(
+      {
+        cellRef: "A3",
+        rawContent,
+        pageTitle: "测试"
+      },
+      "text"
+    );
+
+    expect(node.querySelector(".preview-text")?.textContent).toBe(rawContent);
+  });
+
+  it("renders direct image and video links with native media elements", async () => {
+    const { exports } = await loadSidepanel();
+    const { renderPreview } = exports.sidepanel;
+
+    const imageNode = renderPreview(
+      {
+        cellRef: "A14",
+        rawContent: "https://upload.wikimedia.org/wikipedia/commons/3/3f/Fronalpstock_big.jpg"
+      },
+      "auto"
+    );
+    expect(imageNode.querySelector("img")?.src).toBe(
+      "https://upload.wikimedia.org/wikipedia/commons/3/3f/Fronalpstock_big.jpg"
+    );
+
+    const mp4Node = renderPreview(
+      {
+        cellRef: "A15",
+        rawContent: "https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4"
+      },
+      "auto"
+    );
+    expect(mp4Node.querySelector("video")?.controls).toBe(true);
+    expect(mp4Node.querySelector("video")?.src).toBe(
+      "https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4"
+    );
+
+    const webmNode = renderPreview(
+      {
+        cellRef: "A16",
+        rawContent: "https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.webm"
+      },
+      "auto"
+    );
+    expect(webmNode.querySelector("video")?.controls).toBe(true);
+    expect(webmNode.querySelector("video")?.src).toBe(
+      "https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.webm"
+    );
+  });
+
+  it("keeps surrounding text when a cell mixes text and media links", async () => {
+    const { exports } = await loadSidepanel();
+    const { renderPreview } = exports.sidepanel;
+    const rawContent = "这是一个视频：\nhttps://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4\n结束。";
+
+    const node = renderPreview(
+      {
+        cellRef: "A21",
+        rawContent,
+        pageTitle: "测试"
+      },
+      "auto"
+    );
+
+    expect(node.querySelector("video")?.src).toBe(
+      "https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4"
+    );
+    expect(node.textContent).toContain("这是一个视频");
+    expect(node.textContent).toContain("结束");
+  });
+
+  it("does not leak zero-width title noise into preview body", async () => {
+    const { exports } = await loadSidepanel();
+    const { renderPreview } = exports.sidepanel;
+
+    const node = renderPreview(
+      {
+        cellRef: "A1",
+        rawContent: "只显示单元格",
+        pageTitle: "\u200b\u2060测试 - 飞书云文档"
+      },
+      "auto"
+    );
+
+    expect(node.querySelector(".preview-text")?.textContent).toBe("只显示单元格");
+    expect(node.querySelector(".preview-text")?.textContent || "").not.toContain("飞书云文档");
+    expect(node.querySelector(".preview-card__meta")?.textContent || "").not.toContain("\u2060");
   });
 
   it("shows a waiting state instead of stale content after entering a new Feishu sheet", async () => {

@@ -141,6 +141,140 @@ describe("content-script.js", () => {
     expect(result.status.message).toContain("B12");
   });
 
+  it("captures wiki embedded sheets with unlabeled name boxes and Feishu formula bar classes", async () => {
+    const { window, exports } = await loadContentScript({
+      url: "https://tenant.feishu.cn/wiki/mock"
+    });
+    window.document.title = "\u200b测试 - 飞书云文档";
+
+    const toolbar = window.document.createElement("div");
+    toolbar.setAttribute("role", "toolbar");
+    toolbar.textContent = "菜单 撤销 重做 插入 查找和替换";
+    setVisibleRect(toolbar, { top: 12, left: 0, width: 600, height: 36 });
+
+    const nameBox = window.document.createElement("input");
+    nameBox.value = "A11";
+    setVisibleRect(nameBox, { top: 72, left: 16, width: 74, height: 28 });
+
+    const formula = window.document.createElement("div");
+    formula.className = "formulabar__inputarea simple-text-editor";
+    formula.textContent = "#你是谁\n\n##你好搞笑啊";
+    setVisibleRect(formula, { top: 72, left: 112, width: 360, height: 48 });
+
+    window.document.body.append(toolbar, nameBox, formula);
+
+    const runtime = exports.contentScript.createSheetMateContentScriptRuntime({ skipAutoStart: true });
+    expect(runtime.detectPageSupport()).toMatchObject({
+      pageKind: "sheet-ready",
+      pageSupported: true
+    });
+
+    const result = runtime.readCellSnapshot();
+    expect(result.snapshot).toMatchObject({
+      cellRef: "A11",
+      rawContent: "#你是谁\n\n##你好搞笑啊",
+      source: "name-box+formula-bar",
+      pageTitle: "测试",
+      url: "https://tenant.feishu.cn/wiki/mock"
+    });
+  });
+
+  it("does not emit page noise when no current cell signal exists", async () => {
+    const { window, exports } = await loadContentScript();
+
+    const toolbar = window.document.createElement("div");
+    toolbar.setAttribute("role", "toolbar");
+    toolbar.textContent = "菜单 撤销 重做 插入 查找和替换";
+    setVisibleRect(toolbar, { top: 12, left: 0, width: 600, height: 36 });
+
+    const sidebarNoise = window.document.createElement("textarea");
+    sidebarNoise.value = "飞书云文档\n知识库\n加载中...\nMonica\nCodex";
+    setVisibleRect(sidebarNoise, { top: 620, left: 10, width: 300, height: 100 });
+
+    window.document.body.append(toolbar, sidebarNoise);
+
+    const runtime = exports.contentScript.createSheetMateContentScriptRuntime({ skipAutoStart: true });
+    const result = runtime.readCellSnapshot();
+
+    expect(result.snapshot).toBeNull();
+    expect(result.status).toMatchObject({
+      stage: "miss:no-capture-source",
+      pageKind: "sheet-shell"
+    });
+  });
+
+  it("does not bind import-loading page noise to an empty A1 selection", async () => {
+    const { window, exports } = await loadContentScript({
+      url: "https://tenant.feishu.cn/sheets/mock?sheet=FMIgKF"
+    });
+
+    const toolbar = window.document.createElement("div");
+    toolbar.setAttribute("role", "toolbar");
+    toolbar.textContent = "菜单 撤销 重做 插入 查找和替换";
+    setVisibleRect(toolbar, { top: 12, left: 0, width: 600, height: 36 });
+
+    const nameBox = window.document.createElement("input");
+    nameBox.value = "A1";
+    setVisibleRect(nameBox, { top: 72, left: 16, width: 74, height: 28 });
+
+    const formula = window.document.createElement("div");
+    formula.className = "formulabar__inputarea simple-text-editor";
+    formula.textContent = "";
+    setVisibleRect(formula, { top: 72, left: 112, width: 360, height: 48 });
+
+    const importerNoise = window.document.createElement("div");
+    importerNoise.setAttribute("role", "textbox");
+    importerNoise.textContent = [
+      "上传中 0/1",
+      "导入中...",
+      "sheet-rendering-cases.csv",
+      "飞书云文档",
+      "搜索",
+      "主页",
+      "知识库",
+      "Sheet1",
+      "Sheet2",
+      "菜单",
+      "通用项目管理"
+    ].join("\n");
+    setVisibleRect(importerNoise, { top: 160, left: 0, width: 900, height: 520 });
+
+    window.document.body.append(toolbar, nameBox, formula, importerNoise);
+
+    const runtime = exports.contentScript.createSheetMateContentScriptRuntime({ skipAutoStart: true });
+    expect(runtime.detectPageSupport()).toMatchObject({
+      pageKind: "sheet-shell",
+      pageSupported: true
+    });
+
+    const result = runtime.readCellSnapshot();
+    expect(result.snapshot).toBeNull();
+    expect(result.status).toMatchObject({
+      stage: "miss:no-capture-source",
+      pageKind: "sheet-shell"
+    });
+  });
+
+  it("ignores page noise when a real current cell signal exists", async () => {
+    const { window, exports } = await loadContentScript();
+
+    const sidebarNoise = window.document.createElement("textarea");
+    sidebarNoise.value = "飞书云文档\n知识库\n加载中...\nMonica\nCodex";
+    setVisibleRect(sidebarNoise, { top: 620, left: 10, width: 300, height: 100 });
+    window.document.body.appendChild(sidebarNoise);
+    appendReadySheetDom(window, { cellRef: "A7", rawContent: "第一行\n第二行" });
+
+    const runtime = exports.contentScript.createSheetMateContentScriptRuntime({ skipAutoStart: true });
+    const result = runtime.readCellSnapshot();
+
+    expect(result.snapshot).toMatchObject({
+      cellRef: "A7",
+      rawContent: "第一行\n第二行"
+    });
+    expect(result.snapshot.rawContent).not.toContain("飞书云文档");
+    expect(result.snapshot.rawContent).not.toContain("加载中");
+  });
+
   it("re-sends ready and snapshot when pushState enters a new sheet with the same selected cell", async () => {
     vi.useFakeTimers();
 

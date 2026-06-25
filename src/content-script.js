@@ -30,9 +30,11 @@ function createSheetMateContentScriptRuntime(options = {}) {
     '[aria-label*="formula"]',
     '[aria-label*="fx"]',
     '[class*="formula-bar"]',
+    '[class*="formulabar"]',
     '[class*="formulaBar"]',
     '[class*="formula_input"]',
-    '[class*="formulaInput"]'
+    '[class*="formulaInput"]',
+    '[class*="inputarea"]'
   ];
   const NAME_BOX_SELECTORS = [
     '[data-testid*="name-box"]',
@@ -201,7 +203,14 @@ function createSheetMateContentScriptRuntime(options = {}) {
     );
     const rawContent = contentCandidate?.rawContent ?? "";
 
-    if (!cellRef && !rawContent) {
+    const hasCurrentCellContent = Boolean(
+      formulaBarCandidate?.rawContent ||
+        editorCandidate?.rawContent ||
+        selectedCellCandidate?.rawContent ||
+        exactCellCandidate?.rawContent
+    );
+
+    if (!hasCurrentCellContent) {
       return {
         snapshot: null,
         status: {
@@ -269,9 +278,7 @@ function createSheetMateContentScriptRuntime(options = {}) {
     const selectedCellCandidate = findSelectedCellCandidate(nameBoxCandidate?.cellRef || null);
     const hasGridSignal = hasGridAnchor || Boolean(selectedCellCandidate?.cellRef || selectedCellCandidate?.rawContent);
     const hasCellReferenceSignal = Boolean(nameBoxCandidate?.cellRef || selectedCellCandidate?.cellRef);
-    const hasContentSignal = Boolean(
-      formulaBarCandidate?.rawContent || editorCandidate?.rawContent || selectedCellCandidate?.rawContent
-    );
+    const hasContentSignal = Boolean(formulaBarCandidate?.rawContent || editorCandidate?.rawContent || selectedCellCandidate?.rawContent);
     const hasAnchorPair = hasNameBoxAnchor && hasFormulaBarAnchor;
     const hasWeakSignal =
       hasCellReferenceSignal ||
@@ -421,6 +428,7 @@ function createSheetMateContentScriptRuntime(options = {}) {
 
   function findEditorCandidate(nameBoxCandidate) {
     const elements = collectElements([...EDITOR_SELECTORS]);
+    const nameBoxRect = nameBoxCandidate?.cellRef ? findNameBoxRect(nameBoxCandidate.cellRef) : null;
     if (document.activeElement instanceof HTMLElement) {
       elements.add(document.activeElement);
 
@@ -439,24 +447,48 @@ function createSheetMateContentScriptRuntime(options = {}) {
         continue;
       }
 
+      if (isExcludedCaptureElement(element)) {
+        continue;
+      }
+
       const rawContent = readElementText(element);
       const isActive = element === document.activeElement || element.contains(document.activeElement);
       const isFormulaLike = matchesAnySelector(element, FORMULA_BAR_SELECTORS);
       const rect = element.getBoundingClientRect();
+      const isBareNameBox = STRICT_CELL_REF_REGEX.test(rawContent) && isLikelyTopBarElement(rect) && rect.width <= NAME_BOX_MAX_WIDTH;
+
+      if (isBareNameBox) {
+        continue;
+      }
+
+      const directCellRef = deriveCellReference(element);
+      const alignedToNameBox = isAlignedWithNameBox(rect, nameBoxRect);
+      const formulaBarLike = isFormulaLike && isLikelyTopBarElement(rect) && rect.width >= FORMULA_BAR_MIN_WIDTH && (alignedToNameBox || !nameBoxRect);
+      const activeGridEditor = isActive && isInsideSheetGrid(element);
+      const explicitCurrentCellEditor = Boolean(
+        directCellRef && (!nameBoxCandidate?.cellRef || directCellRef === nameBoxCandidate.cellRef)
+      );
+
+      if (!formulaBarLike && !activeGridEditor && !explicitCurrentCellEditor) {
+        continue;
+      }
+
       const score =
         55 +
         (isActive ? 32 : 0) +
-        (isFormulaLike ? 10 : 0) +
+        (formulaBarLike ? 36 : 0) +
+        (explicitCurrentCellEditor ? 28 : 0) +
+        (activeGridEditor ? 18 : 0) +
         (isLikelyTopBarElement(rect) ? 8 : 0) +
         Math.min(rawContent.length, 60) / 3;
 
-      if (!rawContent && !isActive && !nameBoxCandidate?.cellRef) {
+      if (!rawContent && !isActive && !directCellRef) {
         continue;
       }
 
       candidates.push({
         rawContent,
-        cellRef: deriveCellReference(element) || nameBoxCandidate?.cellRef || null,
+        cellRef: directCellRef || (formulaBarLike || activeGridEditor ? nameBoxCandidate?.cellRef : null) || null,
         source: isFormulaLike ? "formula-bar" : "editor",
         score
       });
@@ -587,6 +619,34 @@ function createSheetMateContentScriptRuntime(options = {}) {
     return activeElement.closest?.(
       '[aria-rowindex][aria-colindex], [data-row][data-col], [data-row-index][data-col-index], [role="gridcell"], [role="cell"]'
     ) || null;
+  }
+
+  function isInsideSheetGrid(element) {
+    return Boolean(
+      element.closest?.(
+        '[role="grid"], [role="table"], [aria-rowindex][aria-colindex], [data-row][data-col], [data-row-index][data-col-index], [role="gridcell"], [role="cell"]'
+      )
+    );
+  }
+
+  function isExcludedCaptureElement(element) {
+    return Boolean(
+      element.closest?.(
+        [
+          '[role="navigation"]',
+          '[role="menu"]',
+          '[aria-modal="true"]',
+          '[class*="sidebar"]',
+          '[class*="side-bar"]',
+          '[class*="upload"]',
+          '[class*="template"]',
+          '[class*="monica"]',
+          '[id*="monica"]',
+          '[class*="codex"]',
+          '[id*="codex"]'
+        ].join(", ")
+      )
+    );
   }
 
   function findNameBoxRect(expectedCellRef) {
@@ -1022,13 +1082,14 @@ function createSheetMateContentScriptRuntime(options = {}) {
 
   function sanitizeMultilineText(value) {
     return String(value || "")
-      .replace(/\u200b/g, "")
+      .replace(/[\u200b-\u200f\u202a-\u202e\u2060-\u206f\ufeff]/g, "")
       .replace(/\r\n?/g, "\n")
       .trim();
   }
 
   function sanitizeInlineText(value) {
     return String(value || "")
+      .replace(/[\u200b-\u200f\u202a-\u202e\u2060-\u206f\ufeff]/g, "")
       .replace(/\s+/g, " ")
       .trim();
   }
